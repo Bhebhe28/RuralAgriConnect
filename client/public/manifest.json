@@ -1,0 +1,20 @@
+{
+  "name": "RurAgriConnect",
+  "short_name": "AgriConnect",
+  "description": "Offline Farm Advisory System for KwaZulu-Natal farmers",
+  "theme_color": "#1B4332",
+  "background_color": "#1B4332",
+  "display": "standalone",
+  "orientation": "portrait",
+  "start_url": "/",
+  "scope": "/",
+  "categories": ["agriculture", "utilities"],
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%231B4332'/><text y='140' x='24' font-size='140'>🌿</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

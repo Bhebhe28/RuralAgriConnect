@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+*.env
+server/data/
+server/dist/
+client/dist/
+firebase-debug.log
+*.log

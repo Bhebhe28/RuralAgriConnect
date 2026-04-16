@@ -1,0 +1,13 @@
+{
+  "name": "ruragriconnect",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently --kill-others --names \"SERVER,CLIENT\" --prefix-colors \"green,cyan\" \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "install:all": "npm install --prefix server && npm install --prefix client",
+    "seed": "npm run db:seed --prefix server"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
