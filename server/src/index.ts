@@ -46,13 +46,20 @@ app.use(helmet({
   // Allow inline styles/scripts needed by the React PWA
   contentSecurityPolicy: false,
 }));
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'https://ruralagriconnect-15c7c.web.app',
+  'https://ruralagriconnect-15c7c.firebaseapp.com',
+  ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : []),
+];
+
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow localhost, local network IPs, and no-origin requests (mobile PWA)
-    if (!origin || origin.includes('localhost') || origin.includes('192.168.') || origin.includes('172.')) {
+    if (!origin || ALLOWED_ORIGINS.includes(origin) || origin.includes('192.168.') || origin.includes('localhost')) {
       callback(null, true);
     } else {
-      callback(null, true); // Allow all for local dev
+      callback(new Error(`CORS blocked: ${origin}`));
     }
   },
   credentials: true,
