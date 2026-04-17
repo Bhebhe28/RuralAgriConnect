@@ -109,16 +109,8 @@ app.get('/api/health', (_, res) =>
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
 );
 
-// One-time seed endpoint — open temporarily for initial setup
-app.post('/api/seed', async (req, res) => {
-  try {
-    const { default: seed } = await import('./db/seed');
-    await seed();
-    res.json({ message: '✅ Database seeded successfully' });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
-  }
-});
+// Seed endpoint — disabled after initial setup
+app.post('/api/seed', (_, res) => res.status(404).json({ error: 'Not found' }));
 
 import os from 'os';
 
