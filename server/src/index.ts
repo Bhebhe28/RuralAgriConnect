@@ -112,13 +112,6 @@ app.get('/api/health', (_, res) =>
 // Seed endpoint — disabled after initial setup
 app.post('/api/seed', (_, res) => res.status(404).json({ error: 'Not found' }));
 
-// Temp debug — remove after fix
-app.get('/api/debug/env', (_, res) => res.json({
-  hasGemini: !!process.env.GEMINI_API_KEY,
-  geminiPrefix: process.env.GEMINI_API_KEY?.substring(0, 10),
-  nodeEnv: process.env.NODE_ENV,
-}));
-
 import os from 'os';
 
 function getLocalIP(): string {
