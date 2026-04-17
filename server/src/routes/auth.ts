@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb, query, run } from '../db/database';
 import { isValidEmail, isStrongPassword } from '../utils';
+import { sendPasswordResetEmail } from '../services/emailService';
 
 const router = Router();
 
@@ -98,6 +99,57 @@ router.post('/register', async (req: Request, res: Response) => {
   );
 
   res.status(201).json({ message: 'Account created successfully' });
+});
+
+// ── FORGOT PASSWORD ────────────────────────────────────────
+router.post('/forgot-password', async (req: Request, res: Response) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email required' });
+
+  const db = await getDb();
+  const [user] = query<any>(db, 'SELECT user_id, email FROM users WHERE email = ?', [email]);
+
+  // Always return success to prevent email enumeration
+  if (!user) return res.json({ message: 'If that email exists, a reset link has been sent.' });
+
+  const token = uuidv4();
+  const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+
+  run(db,
+    `INSERT OR REPLACE INTO password_resets (token, user_id, expires_at) VALUES (?,?,?)`,
+    [token, user.user_id, expires]
+  );
+
+  try {
+    await sendPasswordResetEmail(email, token);
+  } catch (e) {
+    console.error('Email send failed:', e);
+    return res.status(500).json({ error: 'Failed to send reset email. Check server email config.' });
+  }
+
+  res.json({ message: 'If that email exists, a reset link has been sent.' });
+});
+
+// ── RESET PASSWORD ─────────────────────────────────────────
+router.post('/reset-password', async (req: Request, res: Response) => {
+  const { token, password } = req.body;
+  if (!token || !password) return res.status(400).json({ error: 'Token and password required' });
+  if (!isStrongPassword(password)) return res.status(400).json({ error: 'Password must be 8+ characters with uppercase, lowercase and a number' });
+
+  const db = await getDb();
+  const [reset] = query<any>(db,
+    `SELECT * FROM password_resets WHERE token = ? AND expires_at > datetime('now')`,
+    [token]
+  );
+
+  if (!reset) return res.status(400).json({ error: 'Invalid or expired reset link' });
+
+  run(db, `UPDATE users SET password_hash = ? WHERE user_id = ?`,
+    [bcrypt.hashSync(password, 10), reset.user_id]
+  );
+  run(db, `DELETE FROM password_resets WHERE token = ?`, [token]);
+
+  res.json({ message: 'Password updated successfully' });
 });
 
 export default router;

@@ -122,4 +122,9 @@ async function seed() {
   console.log('✅ Database seeded — all tables created per ERD spec');
 }
 
-seed().catch((e) => { console.error(e); process.exit(1); });
+export default seed;
+
+// Allow running directly: ts-node src/db/seed.ts
+if (require.main === module) {
+  seed().catch((e) => { console.error(e); process.exit(1); });
+}

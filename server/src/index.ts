@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import { initDb } from './db/database';
+import { initDb, getDb, query } from './db/database';
 import { fetchAndSaveWeather } from './services/weatherService';
 
 import authRoutes         from './routes/auth';
@@ -27,6 +27,16 @@ const PORT = parseInt(process.env.PORT || '3001', 10);
 // Init DB
 initDb().then(async () => {
   console.log('✅ Database ready');
+
+  // Auto-seed if DB is empty (first deploy)
+  const db = await getDb();
+  const users = query(db, 'SELECT user_id FROM users LIMIT 1');
+  if (users.length === 0) {
+    console.log('🌱 Empty database detected — running seed...');
+    const { default: seed } = await import('./db/seed');
+    await seed();
+    console.log('✅ Seed complete');
+  }
 
   // Delay startup weather fetch by 3s to avoid double-fetch on hot reload
   setTimeout(async () => {
@@ -98,6 +108,21 @@ app.use('/api/analytics',     analyticsRoutes);
 app.get('/api/health', (_, res) =>
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
 );
+
+// One-time seed endpoint — protected by SEED_SECRET env var
+app.post('/api/seed', async (req, res) => {
+  const secret = process.env.SEED_SECRET;
+  if (!secret || req.headers['x-seed-secret'] !== secret) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    const { default: seed } = await import('./db/seed');
+    await seed();
+    res.json({ message: '✅ Database seeded successfully' });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 import os from 'os';
 
