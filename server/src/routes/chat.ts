@@ -65,7 +65,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
 
   if (!message?.trim()) return res.status(400).json({ error: 'Message is required' });
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = (process.env.GEMINI_API_KEY || '').replace(/^=+/, '').trim();
   if (!apiKey || apiKey === 'your_gemini_api_key_here') {
     const reply = getFallbackReply(message);
     logChat(req.user!.id, 'CHAT_FALLBACK', message.slice(0, 100));
@@ -95,7 +95,7 @@ router.post('/scan', authenticate, upload.single('image'), async (req: AuthReque
   const prompt = (req.body.prompt as string) ||
     'Analyze this farm image. Identify any crop diseases, pest damage, or nutrient deficiencies. Provide: 1) Disease/issue name, 2) Confidence level, 3) Symptoms visible, 4) Treatment steps using locally available South African products, 5) Prevention tips for a KZN farmer.';
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = (process.env.GEMINI_API_KEY || '').replace(/^=+/, '').trim();
   if (!apiKey || apiKey === 'your_gemini_api_key_here') {
     return res.json({ reply: '🔍 Image analysis requires a Gemini API key. Please configure GEMINI_API_KEY in server/.env' });
   }
