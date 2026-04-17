@@ -13,8 +13,10 @@ You specialize in crop management, pest and disease identification, soil health,
 When analyzing images: identify crop diseases, pest damage, or nutrient deficiencies. Give a clear diagnosis with confidence level and specific treatment recommendations using locally available South African products.
 Keep responses practical, concise, and actionable. Use simple language suitable for rural farmers.`;
 
-// Models confirmed available for this API key
+// Models for text chat
 const MODELS = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash-lite', 'gemini-2.0-flash-001'];
+// Models for vision/image — gemini-1.5-flash has best free-tier vision support
+const VISION_MODELS = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
 
 function getModel(apiKey: string, modelName: string) {
   const genAI = new GoogleGenerativeAI(apiKey);
@@ -22,8 +24,12 @@ function getModel(apiKey: string, modelName: string) {
 }
 
 async function tryModels(apiKey: string, fn: (model: ReturnType<typeof getModel>) => Promise<string>): Promise<string> {
+  return tryModelsWithList(apiKey, MODELS, fn);
+}
+
+async function tryModelsWithList(apiKey: string, models: string[], fn: (model: ReturnType<typeof getModel>) => Promise<string>): Promise<string> {
   let lastErr: any;
-  for (const modelName of MODELS) {
+  for (const modelName of models) {
     try {
       const model = getModel(apiKey, modelName);
       const reply = await fn(model);
@@ -31,7 +37,6 @@ async function tryModels(apiKey: string, fn: (model: ReturnType<typeof getModel>
     } catch (err: any) {
       lastErr = err;
       const msg = err.message || '';
-      // Only retry on overload/rate errors — stop on 404 not found
       if (msg.includes('404') || (!msg.includes('503') && !msg.includes('429') && !msg.includes('quota') && !msg.includes('high demand') && !msg.includes('overloaded'))) {
         throw err;
       }
@@ -97,7 +102,7 @@ router.post('/scan', authenticate, upload.single('image'), async (req: AuthReque
 
   try {
     const imageData = { inlineData: { mimeType: req.file.mimetype as 'image/jpeg' | 'image/png' | 'image/webp', data: req.file.buffer.toString('base64') } };
-    const reply = await tryModels(apiKey, async (model) => {
+    const reply = await tryModelsWithList(apiKey, VISION_MODELS, async (model) => {
       const result = await model.generateContent([prompt, imageData]);
       return result.response.text();
     });

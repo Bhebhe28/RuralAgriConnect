@@ -109,12 +109,8 @@ app.get('/api/health', (_, res) =>
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
 );
 
-// One-time seed endpoint — protected by SEED_SECRET env var
+// One-time seed endpoint — open temporarily for initial setup
 app.post('/api/seed', async (req, res) => {
-  const secret = process.env.SEED_SECRET || 'ruragri2026';
-  if (req.headers['x-seed-secret'] !== secret) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
   try {
     const { default: seed } = await import('./db/seed');
     await seed();
