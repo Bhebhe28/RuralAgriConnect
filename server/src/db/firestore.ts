@@ -7,12 +7,22 @@ export function getFirestore(): admin.firestore.Firestore {
   if (_db) return _db;
 
   if (!admin.apps.length) {
-    const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS ||
-      path.join(__dirname, '../../serviceAccountKey.json');
-    admin.initializeApp({
-      credential: admin.credential.cert(keyPath),
-      projectId: 'ruralagriconnect-15c7c',
-    });
+    // Support both file path and inline JSON (for Railway/cloud deployments)
+    const inlineJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (inlineJson) {
+      const serviceAccount = JSON.parse(inlineJson);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        projectId: 'ruralagriconnect-15c7c',
+      });
+    } else {
+      const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+        path.join(__dirname, '../../serviceAccountKey.json');
+      admin.initializeApp({
+        credential: admin.credential.cert(keyPath),
+        projectId: 'ruralagriconnect-15c7c',
+      });
+    }
   }
 
   _db = admin.firestore();
