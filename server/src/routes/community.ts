@@ -1,114 +1,82 @@
 import { Router, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { getDb, query, run } from '../db/database';
+import { getDocs, getDoc, setDoc, updateDoc, deleteDoc, now } from '../db/firestore';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
+import * as admin from 'firebase-admin';
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
-// Store community images in server/public/community/
-const communityDir = path.join(__dirname, '../../public/community');
-if (!fs.existsSync(communityDir)) fs.mkdirSync(communityDir, { recursive: true });
+async function uploadImage(buffer: Buffer, mimetype: string, folder: string): Promise<string> {
+  const bucket = admin.storage().bucket();
+  const fileName = `${folder}/${Date.now()}-${uuidv4()}`;
+  const file = bucket.file(fileName);
+  await file.save(buffer, { contentType: mimetype });
+  await file.makePublic();
+  return `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+}
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, communityDir),
-  filename: (req: any, file, cb) => {
-    const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1E9)}${path.extname(file.originalname)}`;
-    cb(null, uniqueName);
-  },
-});
-const upload = multer({ 
-  storage, 
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed'));
-    }
-  }
-});
-
-// Get all posts
-router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
-  const db = await getDb();
-  const posts = query<any>(db, `
-    SELECT p.*, u.full_name as author_name, u.avatar_url as author_avatar,
-      (SELECT COUNT(*) FROM community_replies r WHERE r.post_id = p.post_id) as reply_count
-    FROM community_posts p
-    JOIN users u ON p.user_id = u.user_id
-    ORDER BY p.created_at DESC
-  `);
+router.get('/', authenticate, async (_req: AuthRequest, res: Response) => {
+  const posts = await getDocs<any>('community_posts', [], { field: 'created_at', dir: 'desc' });
   res.json(posts);
 });
 
-// Get single post with replies
 router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
-  const db = await getDb();
-  const [post] = query<any>(db, `
-    SELECT p.*, u.full_name as author_name, u.avatar_url as author_avatar
-    FROM community_posts p JOIN users u ON p.user_id = u.user_id
-    WHERE p.post_id = ?`, [req.params.id]);
+  const post = await getDoc<any>('community_posts', req.params.id);
   if (!post) return res.status(404).json({ error: 'Post not found' });
-
-  const replies = query<any>(db, `
-    SELECT r.*, u.full_name as author_name, u.avatar_url as author_avatar
-    FROM community_replies r JOIN users u ON r.user_id = u.user_id
-    WHERE r.post_id = ? ORDER BY r.created_at ASC`, [req.params.id]);
-
+  const replies = await getDocs<any>('community_replies',
+    [['post_id', '==', req.params.id]], { field: 'created_at', dir: 'asc' });
   res.json({ ...post, replies });
 });
 
-// Create post — any logged in user
 router.post('/', authenticate, upload.single('image'), async (req: AuthRequest, res: Response) => {
   const { title, body, category } = req.body;
   if (!title || !body) return res.status(400).json({ error: 'title and body are required' });
-  
-  const db = await getDb();
+
+  let imageUrl = null;
+  if (req.file) imageUrl = await uploadImage(req.file.buffer, req.file.mimetype, 'community');
+
   const id = uuidv4();
-  const imageUrl = req.file ? `/community/${req.file.filename}` : null;
-  
-  run(db,
-    `INSERT INTO community_posts (post_id, user_id, title, body, category, image_url) VALUES (?,?,?,?,?,?)`,
-    [id, req.user!.id, title, body, category || 'general', imageUrl]
-  );
+  await setDoc('community_posts', id, {
+    user_id: req.user!.id, title, body,
+    category: category || 'general',
+    image_url: imageUrl, likes: 0,
+    created_at: now(), updated_at: now(),
+  });
   res.status(201).json({ id, message: 'Post created', image_url: imageUrl });
 });
 
-// Reply to a post
 router.post('/:id/replies', authenticate, upload.single('image'), async (req: AuthRequest, res: Response) => {
   const { body } = req.body;
   if (!body) return res.status(400).json({ error: 'body is required' });
-  
-  const db = await getDb();
+
+  let imageUrl = null;
+  if (req.file) imageUrl = await uploadImage(req.file.buffer, req.file.mimetype, 'community');
+
   const id = uuidv4();
-  const imageUrl = req.file ? `/community/${req.file.filename}` : null;
-  
-  run(db,
-    `INSERT INTO community_replies (reply_id, post_id, user_id, body, image_url) VALUES (?,?,?,?,?)`,
-    [id, req.params.id, req.user!.id, body, imageUrl]
-  );
+  await setDoc('community_replies', id, {
+    post_id: req.params.id, user_id: req.user!.id,
+    body, image_url: imageUrl, created_at: now(),
+  });
   res.status(201).json({ id, message: 'Reply added', image_url: imageUrl });
 });
 
-// Like a post
 router.post('/:id/like', authenticate, async (req: AuthRequest, res: Response) => {
-  const db = await getDb();
-  run(db, `UPDATE community_posts SET likes = likes + 1 WHERE post_id = ?`, [req.params.id]);
+  const post = await getDoc<any>('community_posts', req.params.id);
+  if (!post) return res.status(404).json({ error: 'Post not found' });
+  await updateDoc('community_posts', req.params.id, { likes: (post.likes || 0) + 1 });
   res.json({ message: 'Liked' });
 });
 
-// Delete post (own post or admin)
 router.delete('/:id', authenticate, async (req: AuthRequest, res: Response) => {
-  const db = await getDb();
-  const [post] = query<any>(db, `SELECT user_id FROM community_posts WHERE post_id = ?`, [req.params.id]);
+  const post = await getDoc<any>('community_posts', req.params.id);
   if (!post) return res.status(404).json({ error: 'Post not found' });
   if (post.user_id !== req.user!.id && req.user!.role !== 'admin')
     return res.status(403).json({ error: 'Not allowed' });
-  run(db, `DELETE FROM community_replies WHERE post_id = ?`, [req.params.id]);
-  run(db, `DELETE FROM community_posts WHERE post_id = ?`, [req.params.id]);
+  const replies = await getDocs('community_replies', [['post_id', '==', req.params.id]]);
+  await Promise.all(replies.map((r: any) => deleteDoc('community_replies', r.id)));
+  await deleteDoc('community_posts', req.params.id);
   res.json({ message: 'Post deleted' });
 });
 

@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { getDb, run } from '../db/database';
+import { setDoc, now } from '../db/firestore';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
 
@@ -47,12 +47,10 @@ async function tryModelsWithList(apiKey: string, models: string[], fn: (model: R
 }
 
 function logChat(userId: string, action: string, details: string) {
-  getDb().then(db => {
-    run(db,
-      `INSERT INTO activity_logs (log_id, user_id, action, entity_type, entity_id, details)
-       VALUES (?,?,?,?,?,?)`,
-      [uuidv4(), userId, action, 'chat', uuidv4(), details]
-    );
+  setDoc('activity_logs', uuidv4(), {
+    user_id: userId, action,
+    entity_type: 'chat', entity_id: uuidv4(),
+    details, created_at: now(),
   }).catch(() => {});
 }
 

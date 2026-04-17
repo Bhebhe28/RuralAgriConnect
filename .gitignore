@@ -7,3 +7,4 @@ server/dist/
 client/dist/
 firebase-debug.log
 *.log
+server/serviceAccountKey.json

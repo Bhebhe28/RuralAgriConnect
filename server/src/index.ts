@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import { initDb, getDb, query } from './db/database';
+import { getFirestore } from './db/firestore';
 import { fetchAndSaveWeather } from './services/weatherService';
 
 import authRoutes         from './routes/auth';
@@ -24,38 +24,79 @@ import analyticsRoutes    from './routes/analytics';
 const app  = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
-// Init DB
-initDb().then(async () => {
-  console.log('✅ Database ready');
+// Init Firestore
+try {
+  getFirestore();
+  console.log('✅ Firestore connected');
+} catch (e) {
+  console.error('❌ Firestore init failed:', e);
+}
 
-  // Auto-seed if DB is empty (first deploy)
-  const db = await getDb();
-  const users = query(db, 'SELECT user_id FROM users LIMIT 1');
-  if (users.length === 0) {
-    console.log('🌱 Empty database detected — running seed...');
-    const { default: seed } = await import('./db/seed');
-    await seed();
-    console.log('✅ Seed complete');
-  }
+// Seed admin user on first run
+async function seedIfEmpty() {
+  const { getDocs, setDoc, now } = await import('./db/firestore');
+  const bcrypt = await import('bcryptjs');
+  const { v4: uuidv4 } = await import('uuid');
 
-  // Delay startup weather fetch by 3s to avoid double-fetch on hot reload
-  setTimeout(async () => {
-    console.log('🌤  Fetching weather data...');
-    await fetchAndSaveWeather().catch(console.error);
-  }, 3000);
+  const users = await getDocs('users');
+  if (users.length > 0) return;
 
-  // Auto-refresh weather every 30 minutes
-  setInterval(() => {
-    fetchAndSaveWeather().catch(console.error);
-  }, 30 * 60 * 1000);
+  console.log('🌱 Seeding initial data...');
 
-}).catch(console.error);
+  const adminId   = uuidv4();
+  const farmer1Id = uuidv4();
+  const farmer2Id = uuidv4();
+
+  await setDoc('users', adminId, {
+    full_name: 'Admin User', email: 'admin@farm.co.za',
+    phone_number: '+27831000001',
+    password_hash: bcrypt.hashSync('Admin@123', 10),
+    role: 'admin', region: null, avatar_url: null, created_at: now(),
+  });
+  await setDoc('users', farmer1Id, {
+    full_name: 'Sipho Dlamini', email: 'sipho@farm.co.za',
+    phone_number: '+27721000001',
+    password_hash: bcrypt.hashSync('Farmer@123', 10),
+    role: 'farmer', region: 'KwaZulu-Natal — uMgungundlovu',
+    avatar_url: null, created_at: now(),
+  });
+  await setDoc('users', farmer2Id, {
+    full_name: 'Nomvula Zulu', email: 'nomvula@farm.co.za',
+    phone_number: '+27721000002',
+    password_hash: bcrypt.hashSync('Farmer@123', 10),
+    role: 'farmer', region: 'KwaZulu-Natal — iLembe',
+    avatar_url: null, created_at: now(),
+  });
+
+  // Seed advisories
+  const adv1 = uuidv4();
+  await setDoc('advisories', adv1, {
+    title: 'Maize Fall Armyworm Alert',
+    content: 'Fall armyworm detected in several maize fields. Apply Coragen or Ampligo early morning.',
+    crop_type: 'Maize', region: 'KwaZulu-Natal — eThekwini',
+    severity: 'critical', created_by: adminId,
+    created_at: now(), updated_at: now(),
+  });
+  await setDoc('advisories', uuidv4(), {
+    title: 'Optimal Planting Window — Vegetables',
+    content: 'Ideal conditions for planting tomatoes, spinach, and cabbage.',
+    crop_type: 'Vegetables', region: 'KwaZulu-Natal — uMgungundlovu',
+    severity: 'info', created_by: adminId,
+    created_at: now(), updated_at: now(),
+  });
+
+  console.log('✅ Seed complete — admin@farm.co.za / Admin@123');
+}
+
+seedIfEmpty().catch(console.error);
+
+// Weather refresh
+setTimeout(() => fetchAndSaveWeather().catch(console.error), 5000);
+setInterval(() => fetchAndSaveWeather().catch(console.error), 30 * 60 * 1000);
 
 // Middleware
-app.use(helmet({
-  // Allow inline styles/scripts needed by the React PWA
-  contentSecurityPolicy: false,
-}));
+app.use(helmet({ contentSecurityPolicy: false }));
+
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
   'http://localhost:4173',
@@ -66,7 +107,7 @@ const ALLOWED_ORIGINS = [
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || ALLOWED_ORIGINS.includes(origin) || origin.includes('192.168.') || origin.includes('localhost')) {
+    if (!origin || ALLOWED_ORIGINS.includes(origin) || origin.includes('localhost')) {
       callback(null, true);
     } else {
       callback(new Error(`CORS blocked: ${origin}`));
@@ -76,18 +117,11 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Rate limiting on auth endpoints — 10 attempts per 15 minutes per IP
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
+  windowMs: 15 * 60 * 1000, max: 10,
   message: { error: 'Too many attempts, please try again in 15 minutes.' },
-  standardHeaders: true,
-  legacyHeaders: false,
+  standardHeaders: true, legacyHeaders: false,
 });
-
-// Static file serving
-app.use('/avatars', express.static('public/avatars'));
-app.use('/community', express.static('public/community'));
 
 // Routes
 app.use('/api/auth',          authLimiter, authRoutes);
@@ -106,28 +140,9 @@ app.use('/api/fields',        fieldRoutes);
 app.use('/api/analytics',     analyticsRoutes);
 
 app.get('/api/health', (_, res) =>
-  res.json({ status: 'ok', timestamp: new Date().toISOString() })
+  res.json({ status: 'ok', db: 'firestore', timestamp: new Date().toISOString() })
 );
 
-// Seed endpoint — disabled after initial setup
-app.post('/api/seed', (_, res) => res.status(404).json({ error: 'Not found' }));
-
-import os from 'os';
-
-function getLocalIP(): string {
-  const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name] || []) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
-      }
-    }
-  }
-  return 'localhost';
-}
-
 app.listen(PORT, '0.0.0.0', () => {
-  const ip = getLocalIP();
   console.log(`🌿 RuralAgriConnect API running on http://localhost:${PORT}`);
-  console.log(`📱 Network access: http://${ip}:${PORT}`);
 });

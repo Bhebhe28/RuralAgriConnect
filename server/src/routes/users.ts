@@ -1,75 +1,47 @@
 import { Router, Response } from 'express';
-import { getDb, query, run } from '../db/database';
+import { getDocs, getDoc, updateDoc, deleteDoc } from '../db/firestore';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
+import { getFirestore } from '../db/firestore';
+import * as admin from 'firebase-admin';
 
 const router = Router();
-
-// Store avatars in server/public/avatars/
-const avatarDir = path.join(__dirname, '../../public/avatars');
-if (!fs.existsSync(avatarDir)) fs.mkdirSync(avatarDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, avatarDir),
-  filename: (req: any, file, cb) => cb(null, `${req.user!.id}${path.extname(file.originalname)}`),
-});
-const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
-  const db = await getDb();
-  const [user] = query<any>(db,
-    `SELECT u.user_id as id, u.full_name as name, u.email, u.phone_number as phone,
-            r.role_name as role, f.region, f.crop_type, u.created_at
-     FROM users u
-     LEFT JOIN roles r ON u.role_id = r.role_id
-     LEFT JOIN farmers f ON f.farmer_id = u.user_id
-     WHERE u.user_id = ?`,
-    [req.user!.id]
-  );
-  res.json(user);
+  const user = await getDoc<any>('users', req.user!.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const { password_hash, ...safe } = user;
+  res.json(safe);
 });
 
 router.put('/me', authenticate, async (req: AuthRequest, res: Response) => {
   const { name, phone, region } = req.body;
-  const db = await getDb();
-  run(db,
-    `UPDATE users SET full_name=?, phone_number=? WHERE user_id=?`,
-    [name, phone, req.user!.id]
-  );
-  run(db, `UPDATE farmers SET region=? WHERE farmer_id=?`, [region, req.user!.id]);
+  await updateDoc('users', req.user!.id, {
+    full_name: name, phone_number: phone, region,
+  });
   res.json({ message: 'Profile updated' });
 });
 
-// Upload profile photo
 router.post('/me/avatar', authenticate, upload.single('avatar'), async (req: AuthRequest, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
-  const avatarUrl = `/avatars/${req.file.filename}`;
-  const db = await getDb();
-  run(db, `UPDATE users SET avatar_url=? WHERE user_id=?`, [avatarUrl, req.user!.id]);
+  const bucket = admin.storage().bucket();
+  const fileName = `avatars/${req.user!.id}`;
+  const file = bucket.file(fileName);
+  await file.save(req.file.buffer, { contentType: req.file.mimetype });
+  await file.makePublic();
+  const avatarUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+  await updateDoc('users', req.user!.id, { avatar_url: avatarUrl });
   res.json({ avatar_url: avatarUrl, message: 'Avatar updated' });
 });
 
-router.get('/', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
-  const db = await getDb();
-  const users = query<any>(db,
-    `SELECT u.user_id as id, u.full_name as name, u.email, u.phone_number as phone,
-            r.role_name as role, f.region, f.crop_type, u.created_at
-     FROM users u
-     LEFT JOIN roles r ON u.role_id = r.role_id
-     LEFT JOIN farmers f ON f.farmer_id = u.user_id
-     ORDER BY u.created_at DESC`
-  );
-  res.json(users);
+router.get('/', authenticate, requireAdmin, async (_req: AuthRequest, res: Response) => {
+  const users = await getDocs<any>('users', [], { field: 'created_at', dir: 'desc' });
+  res.json(users.map(({ password_hash, ...u }) => u));
 });
 
 router.delete('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
-  const db = await getDb();
-  run(db, 'DELETE FROM farmers  WHERE farmer_id = ?',  [req.params.id]);
-  run(db, 'DELETE FROM officers WHERE officer_id = ?', [req.params.id]);
-  run(db, 'DELETE FROM user_roles WHERE user_id = ?',  [req.params.id]);
-  run(db, 'DELETE FROM users WHERE user_id = ?',       [req.params.id]);
+  await deleteDoc('users', req.params.id);
   res.json({ message: 'User deleted' });
 });
 
