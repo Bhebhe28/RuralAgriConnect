@@ -28,8 +28,9 @@ const PORT = parseInt(process.env.PORT || '3001', 10);
 try {
   getFirestore();
   console.log('✅ Firestore connected');
-} catch (e) {
-  console.error('❌ Firestore init failed:', e);
+} catch (e: any) {
+  console.error('❌ Firestore init failed:', e.message);
+  process.exit(1);
 }
 
 // Seed admin user on first run

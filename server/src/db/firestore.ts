@@ -10,7 +10,7 @@ export function getFirestore(): admin.firestore.Firestore {
     // Support both file path and inline JSON (for Railway/cloud deployments)
     const inlineJson = process.env.FIREBASE_SERVICE_ACCOUNT;
     if (inlineJson) {
-      const serviceAccount = JSON.parse(inlineJson);
+      const serviceAccount = JSON.parse(inlineJson.replace(/\\n/g, '\n'));
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
         projectId: 'ruralagriconnect-15c7c',
