@@ -10,14 +10,18 @@ export function getFirestore(): admin.firestore.Firestore {
     const inlineJson = process.env.FIREBASE_SERVICE_ACCOUNT;
     if (inlineJson) {
       try {
-        const serviceAccount = JSON.parse(inlineJson.replace(/\\n/g, '\n'));
+        // Handle both escaped and unescaped newlines
+        const cleaned = inlineJson.replace(/\\n/g, '\n');
+        const serviceAccount = JSON.parse(cleaned);
         admin.initializeApp({
           credential: admin.credential.cert(serviceAccount),
           projectId: 'ruralagriconnect-15c7c',
         });
         console.log('✅ Firebase initialized from FIREBASE_SERVICE_ACCOUNT env var');
       } catch (e: any) {
-        throw new Error(`Failed to parse FIREBASE_SERVICE_ACCOUNT: ${e.message}`);
+        console.error('❌ Failed to parse FIREBASE_SERVICE_ACCOUNT:', e.message);
+        console.error('First 100 chars:', inlineJson.substring(0, 100));
+        throw e;
       }
     } else {
       // Local dev — use service account file
