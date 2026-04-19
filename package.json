@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "npm run dev --prefix client",
+    "dev": "concurrently -n server,client -c green,blue \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
     "build": "npm run build --prefix client",
-    "deploy": "npm run build --prefix client && firebase deploy",
-    "server": "npm run dev --prefix server",
+    "deploy": "npm run build --prefix client && firebase deploy --only hosting",
     "build:server": "npm run build --prefix server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }
