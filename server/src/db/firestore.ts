@@ -7,17 +7,23 @@ export function getFirestore(): admin.firestore.Firestore {
   if (_db) return _db;
 
   if (!admin.apps.length) {
-    // Support both file path and inline JSON (for Railway/cloud deployments)
     const inlineJson = process.env.FIREBASE_SERVICE_ACCOUNT;
     if (inlineJson) {
-      const serviceAccount = JSON.parse(inlineJson.replace(/\\n/g, '\n'));
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        projectId: 'ruralagriconnect-15c7c',
-      });
+      try {
+        const serviceAccount = JSON.parse(inlineJson.replace(/\\n/g, '\n'));
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+          projectId: 'ruralagriconnect-15c7c',
+        });
+        console.log('✅ Firebase initialized from FIREBASE_SERVICE_ACCOUNT env var');
+      } catch (e: any) {
+        throw new Error(`Failed to parse FIREBASE_SERVICE_ACCOUNT: ${e.message}`);
+      }
     } else {
+      // Local dev — use service account file
       const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS ||
         path.join(__dirname, '../../serviceAccountKey.json');
+      console.log(`🔑 Using service account file: ${keyPath}`);
       admin.initializeApp({
         credential: admin.credential.cert(keyPath),
         projectId: 'ruralagriconnect-15c7c',
