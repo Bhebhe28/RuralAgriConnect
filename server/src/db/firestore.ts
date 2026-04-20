@@ -64,10 +64,22 @@ export async function getDocs<T>(
   const db = getFirestore();
   let q: admin.firestore.Query = db.collection(collection);
   for (const [field, op, val] of filters) q = q.where(field, op, val);
-  if (orderBy) q = q.orderBy(orderBy.field, orderBy.dir || 'desc');
-  if (limitN) q = q.limit(limitN);
+  // Only use orderBy when no filters — avoids composite index requirement
+  if (orderBy && filters.length === 0) q = q.orderBy(orderBy.field, orderBy.dir || 'desc');
+  if (limitN && filters.length === 0) q = q.limit(limitN);
   const snap = await q.get();
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }) as T);
+  let docs = snap.docs.map(d => ({ id: d.id, ...d.data() }) as T);
+  // Sort in memory when filters are present
+  if (orderBy && filters.length > 0) {
+    const { field, dir } = orderBy;
+    docs = docs.sort((a: any, b: any) => {
+      if (a[field] < b[field]) return dir === 'asc' ? -1 : 1;
+      if (a[field] > b[field]) return dir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }
+  if (limitN) docs = docs.slice(0, limitN);
+  return docs;
 }
 
 export async function setDoc(collection: string, id: string, data: Record<string, any>): Promise<void> {
