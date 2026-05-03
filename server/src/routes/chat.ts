@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { setDoc, now } from '../db/firestore';
+import { getDb, run } from '../db/database';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
 
@@ -13,18 +13,12 @@ You specialize in crop management, pest and disease identification, soil health,
 When analyzing images: identify crop diseases, pest damage, or nutrient deficiencies. Give a clear diagnosis with confidence level and specific treatment recommendations using locally available South African products.
 Keep responses practical, concise, and actionable. Use simple language suitable for rural farmers.`;
 
-// Models for text chat
-const MODELS = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash-lite', 'gemini-2.0-flash-001'];
-// Models for vision/image — gemini-1.5-flash has best free-tier vision support
+const MODELS        = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash-lite', 'gemini-2.0-flash-001'];
 const VISION_MODELS = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
 
 function getModel(apiKey: string, modelName: string) {
   const genAI = new GoogleGenerativeAI(apiKey);
   return genAI.getGenerativeModel({ model: modelName, systemInstruction: SYSTEM_PROMPT });
-}
-
-async function tryModels(apiKey: string, fn: (model: ReturnType<typeof getModel>) => Promise<string>): Promise<string> {
-  return tryModelsWithList(apiKey, MODELS, fn);
 }
 
 async function tryModelsWithList(apiKey: string, models: string[], fn: (model: ReturnType<typeof getModel>) => Promise<string>): Promise<string> {
@@ -46,12 +40,12 @@ async function tryModelsWithList(apiKey: string, models: string[], fn: (model: R
   throw lastErr;
 }
 
-function logChat(userId: string, action: string, details: string) {
-  setDoc('activity_logs', uuidv4(), {
-    user_id: userId, action,
-    entity_type: 'chat', entity_id: uuidv4(),
-    details, created_at: now(),
-  }).catch(() => {});
+async function logChat(userId: string, action: string, details: string) {
+  try {
+    const db = await getDb();
+    run(db, `INSERT INTO activity_logs (log_id, user_id, action, entity_type, entity_id, details) VALUES (?,?,?,?,?,?)`,
+      [uuidv4(), userId, action, 'chat', uuidv4(), details]);
+  } catch { /* non-critical */ }
 }
 
 // ── TEXT CHAT ────────────────────────────────────────────────
@@ -71,7 +65,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    const reply = await tryModels(apiKey, async (model) => {
+    const reply = await tryModelsWithList(apiKey, MODELS, async (model) => {
       const chat = model.startChat({ history: history || [] });
       const result = await chat.sendMessage(message);
       return result.response.text();
@@ -99,7 +93,12 @@ router.post('/scan', authenticate, upload.single('image'), async (req: AuthReque
   }
 
   try {
-    const imageData = { inlineData: { mimeType: req.file.mimetype as 'image/jpeg' | 'image/png' | 'image/webp', data: req.file.buffer.toString('base64') } };
+    const imageData = {
+      inlineData: {
+        mimeType: req.file.mimetype as 'image/jpeg' | 'image/png' | 'image/webp',
+        data: req.file.buffer.toString('base64'),
+      },
+    };
     const reply = await tryModelsWithList(apiKey, VISION_MODELS, async (model) => {
       const result = await model.generateContent([prompt, imageData]);
       return result.response.text();

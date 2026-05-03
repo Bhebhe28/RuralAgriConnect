@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
-import { getDocs, setDoc, updateDoc, deleteDoc, now } from '../db/firestore';
+import { getDb, query, run } from '../db/database';
 import { isValidEmail, isStrongPassword } from '../utils';
 import { sendPasswordResetEmail } from '../services/emailService';
 
@@ -12,7 +12,8 @@ router.post('/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
-  const users = await getDocs<any>('users', [['email', '==', email]]);
+  const db = await getDb();
+  const users = query<any>(db, `SELECT * FROM users WHERE email = ?`, [email]);
   const user = users[0];
 
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
@@ -20,15 +21,19 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 
   const token = jwt.sign(
-    { id: user.id, role: user.role || 'farmer', email: user.email },
+    { id: user.user_id, role: user.role || 'farmer', email: user.email },
     process.env.JWT_SECRET || 'secret',
     { expiresIn: '7d' }
   );
 
+  // Log activity
+  run(db, `INSERT INTO activity_logs (log_id, user_id, action, entity_type, entity_id, details) VALUES (?,?,?,?,?,?)`,
+    [uuidv4(), user.user_id, 'LOGIN', 'user', user.user_id, `${user.role} logged in`]);
+
   res.json({
     token,
     user: {
-      id:     user.id,
+      id:     user.user_id,
       name:   user.full_name,
       email:  user.email,
       phone:  user.phone_number,
@@ -47,32 +52,18 @@ router.post('/register', async (req: Request, res: Response) => {
   if (!isStrongPassword(password))
     return res.status(400).json({ error: 'Password must be 8+ characters with uppercase, lowercase and a number' });
 
-  const existing = await getDocs('users', [['email', '==', email]]);
+  const db = await getDb();
+  const existing = query(db, `SELECT user_id FROM users WHERE email = ?`, [email]);
   if (existing.length > 0) return res.status(409).json({ error: 'Email already registered' });
 
   const roleName = role || 'farmer';
   const userId = uuidv4();
 
-  await setDoc('users', userId, {
-    full_name:     name,
-    email,
-    phone_number:  phone || null,
-    password_hash: bcrypt.hashSync(password, 10),
-    role:          roleName,
-    region:        region || null,
-    avatar_url:    null,
-    created_at:    now(),
-  });
+  run(db, `INSERT INTO users (user_id, full_name, email, phone_number, password_hash, role, region) VALUES (?,?,?,?,?,?,?)`,
+    [userId, name, email, phone || null, bcrypt.hashSync(password, 10), roleName, region || null]);
 
-  // Log activity
-  await setDoc('activity_logs', uuidv4(), {
-    user_id:     userId,
-    action:      'REGISTER',
-    entity_type: 'user',
-    entity_id:   userId,
-    details:     `New ${roleName} account created`,
-    created_at:  now(),
-  });
+  run(db, `INSERT INTO activity_logs (log_id, user_id, action, entity_type, entity_id, details) VALUES (?,?,?,?,?,?)`,
+    [uuidv4(), userId, 'REGISTER', 'user', userId, `New ${roleName} account created`]);
 
   res.status(201).json({ message: 'Account created successfully' });
 });
@@ -82,17 +73,19 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email required' });
 
-  const users = await getDocs<any>('users', [['email', '==', email]]);
+  const db = await getDb();
+  const users = query<any>(db, `SELECT user_id FROM users WHERE email = ?`, [email]);
+
+  // Always return same message to prevent email enumeration
   if (!users.length) return res.json({ message: 'If that email exists, a reset link has been sent.' });
 
   const token = uuidv4();
   const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
-  await setDoc('password_resets', token, {
-    user_id:    users[0].id,
-    expires_at: expires,
-    created_at: now(),
-  });
+  // Remove any existing reset tokens for this user
+  run(db, `DELETE FROM password_resets WHERE user_id = ?`, [users[0].user_id]);
+  run(db, `INSERT INTO password_resets (token, user_id, expires_at) VALUES (?,?,?)`,
+    [token, users[0].user_id, expires]);
 
   try {
     await sendPasswordResetEmail(email, token);
@@ -108,22 +101,20 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
 router.post('/reset-password', async (req: Request, res: Response) => {
   const { token, password } = req.body;
   if (!token || !password) return res.status(400).json({ error: 'Token and password required' });
-  if (!isStrongPassword(password)) return res.status(400).json({ error: 'Password must be 8+ characters with uppercase, lowercase and a number' });
+  if (!isStrongPassword(password))
+    return res.status(400).json({ error: 'Password must be 8+ characters with uppercase, lowercase and a number' });
 
-  const reset = await getDocs<any>('password_resets', [
-    ['__name__', '==', token],
-  ]);
+  const db = await getDb();
+  const resets = query<any>(db, `SELECT * FROM password_resets WHERE token = ?`, [token]);
+  const reset = resets[0];
 
-  // Check manually since Firestore doesn't support date comparison easily
-  const resetDoc = reset[0];
-  if (!resetDoc || new Date(resetDoc.expires_at) < new Date()) {
+  if (!reset || new Date(reset.expires_at) < new Date()) {
     return res.status(400).json({ error: 'Invalid or expired reset link' });
   }
 
-  await updateDoc('users', resetDoc.user_id, {
-    password_hash: bcrypt.hashSync(password, 10),
-  });
-  await deleteDoc('password_resets', token);
+  run(db, `UPDATE users SET password_hash = ? WHERE user_id = ?`,
+    [bcrypt.hashSync(password, 10), reset.user_id]);
+  run(db, `DELETE FROM password_resets WHERE token = ?`, [token]);
 
   res.json({ message: 'Password updated successfully' });
 });

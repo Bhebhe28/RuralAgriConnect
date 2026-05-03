@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { getDocs, getDoc, setDoc, updateDoc, deleteDoc, now } from '../db/firestore';
+import { getDb, query, run } from '../db/database';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 
 const PREVENTION_TIPS: Record<string, string[]> = {
@@ -59,19 +59,23 @@ function getPreventionTips(crop: string, content: string): string[] {
 const router = Router();
 
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
-  const filters: any[] = [];
-  if (req.query.crop)     filters.push(['crop_type', '==', req.query.crop]);
-  if (req.query.region)   filters.push(['region', '==', req.query.region]);
-  if (req.query.severity) filters.push(['severity', '==', req.query.severity]);
-
-  const rows = await getDocs<any>('advisories', filters, { field: 'created_at', dir: 'desc' });
-  res.json(rows.map(a => ({ ...a, prevention_tips: getPreventionTips(a.crop_type, a.content) })));
+  const db = await getDb();
+  let sql = `SELECT * FROM advisories WHERE 1=1`;
+  const params: any[] = [];
+  if (req.query.crop)     { sql += ` AND crop_type = ?`;  params.push(req.query.crop); }
+  if (req.query.region)   { sql += ` AND region = ?`;     params.push(req.query.region); }
+  if (req.query.severity) { sql += ` AND severity = ?`;   params.push(req.query.severity); }
+  sql += ` ORDER BY created_at DESC`;
+  const rows = query<any>(db, sql, params);
+  res.json(rows.map(a => ({ ...a, id: a.advisory_id, prevention_tips: getPreventionTips(a.crop_type, a.content) })));
 });
 
 router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
-  const advisory = await getDoc<any>('advisories', req.params.id);
-  if (!advisory) return res.status(404).json({ error: 'Advisory not found' });
-  res.json({ ...advisory, prevention_tips: getPreventionTips(advisory.crop_type, advisory.content) });
+  const db = await getDb();
+  const rows = query<any>(db, `SELECT * FROM advisories WHERE advisory_id = ?`, [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Advisory not found' });
+  const a = rows[0];
+  res.json({ ...a, id: a.advisory_id, prevention_tips: getPreventionTips(a.crop_type, a.content) });
 });
 
 router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
@@ -79,34 +83,21 @@ router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Respo
   if (!title || !content || !crop || !region)
     return res.status(400).json({ error: 'title, content, crop and region are required' });
 
+  const db = await getDb();
   const id = uuidv4();
-  await setDoc('advisories', id, {
-    title, content,
-    crop_type:  crop,
-    region,
-    severity:   severity || 'info',
-    created_by: req.user!.id,
-    created_at: now(),
-    updated_at: now(),
-  });
+  const now = new Date().toISOString();
 
-  await setDoc('activity_logs', uuidv4(), {
-    user_id: req.user!.id, action: 'PUBLISH_ADVISORY',
-    entity_type: 'advisory', entity_id: id,
-    details: `Published: ${title}`, created_at: now(),
-  });
+  run(db, `INSERT INTO advisories (advisory_id, title, content, crop_type, region, severity, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+    [id, title, content, crop, region, severity || 'info', req.user!.id, now, now]);
+
+  run(db, `INSERT INTO activity_logs (log_id, user_id, action, entity_type, entity_id, details) VALUES (?,?,?,?,?,?)`,
+    [uuidv4(), req.user!.id, 'PUBLISH_ADVISORY', 'advisory', id, `Published: ${title}`]);
 
   // Notify farmers in region
-  const farmers = await getDocs<any>('users', [['role', '==', 'farmer']]);
+  const farmers = query<any>(db, `SELECT user_id FROM users WHERE role = 'farmer'`);
   for (const f of farmers) {
-    if (!f.region || f.region.includes(region.split('—')[1]?.trim() || region)) {
-      await setDoc('notifications', uuidv4(), {
-        user_id: f.id, advisory_id: id,
-        title, message: `New advisory: ${title}`,
-        channel: 'app', status: 'pending', read: false,
-        created_at: now(),
-      });
-    }
+    run(db, `INSERT INTO notifications (notif_id, user_id, advisory_id, title, message, channel, status, read, created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+      [uuidv4(), f.user_id, id, title, `New advisory: ${title}`, 'app', 'pending', 0, now]);
   }
 
   res.status(201).json({ id, message: 'Advisory published' });
@@ -114,14 +105,15 @@ router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Respo
 
 router.put('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   const { title, content, crop, region, severity } = req.body;
-  await updateDoc('advisories', req.params.id, {
-    title, content, crop_type: crop, region, severity, updated_at: now(),
-  });
+  const db = await getDb();
+  run(db, `UPDATE advisories SET title=?, content=?, crop_type=?, region=?, severity=?, updated_at=? WHERE advisory_id=?`,
+    [title, content, crop, region, severity, new Date().toISOString(), req.params.id]);
   res.json({ message: 'Advisory updated' });
 });
 
 router.delete('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
-  await deleteDoc('advisories', req.params.id);
+  const db = await getDb();
+  run(db, `DELETE FROM advisories WHERE advisory_id = ?`, [req.params.id]);
   res.json({ message: 'Advisory deleted' });
 });
 

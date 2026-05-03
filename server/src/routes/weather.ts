@@ -1,16 +1,18 @@
 import { Router, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { getDocs, setDoc, deleteDoc, now } from '../db/firestore';
+import { getDb, query, run } from '../db/database';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 import { fetchAndSaveWeather } from '../services/weatherService';
 
 const router = Router();
 
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
-  const filters: any[] = [];
-  if (req.query.region) filters.push(['region', '==', req.query.region]);
-
-  let rows = await getDocs<any>('weather_data', filters, { field: 'forecast_date', dir: 'desc' });
+  const db = await getDb();
+  let sql = `SELECT * FROM weather_data WHERE 1=1`;
+  const params: any[] = [];
+  if (req.query.region) { sql += ` AND region = ?`; params.push(req.query.region); }
+  sql += ` ORDER BY forecast_date DESC`;
+  let rows = query<any>(db, sql, params);
 
   // Deduplicate — keep latest per region
   const seen = new Set<string>();
@@ -24,16 +26,16 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
     const fresh = await fetchAndSaveWeather();
     return res.json(fresh);
   }
-  res.json(rows);
+  res.json(rows.map(r => ({ ...r, id: r.weather_id })));
 });
 
 router.get('/alerts', authenticate, async (req: AuthRequest, res: Response) => {
-  const filters: any[] = [['alert_type', '==', 'weather']];
-  const alerts = await getDocs<any>('alerts', filters, { field: 'created_at', dir: 'desc' });
+  const db = await getDb();
+  let alerts = query<any>(db, `SELECT * FROM alerts WHERE alert_type = 'weather' ORDER BY created_at DESC`);
   if (req.query.region) {
-    return res.json(alerts.filter((a: any) => a.message?.includes(req.query.region as string)));
+    alerts = alerts.filter((a: any) => a.message?.includes(req.query.region as string));
   }
-  res.json(alerts);
+  res.json(alerts.map(a => ({ ...a, id: a.alert_id })));
 });
 
 router.post('/refresh', authenticate, requireAdmin, async (_req: AuthRequest, res: Response) => {
@@ -49,19 +51,17 @@ router.post('/alerts', authenticate, requireAdmin, async (req: AuthRequest, res:
   const { alert_type, message, region, severity } = req.body;
   if (!message || !region) return res.status(400).json({ error: 'message and region are required' });
 
+  const db = await getDb();
   const id = uuidv4();
-  await setDoc('alerts', id, {
-    alert_type: alert_type || 'weather',
-    message: `${message} — ${region}`,
-    issued_by: req.user!.id,
-    severity: severity || 'info',
-    created_at: now(),
-  });
+  run(db, `INSERT INTO alerts (alert_id, alert_type, message, issued_by, severity, created_at) VALUES (?,?,?,?,?,?)`,
+    [id, alert_type || 'weather', `${message} — ${region}`, req.user!.id,
+     severity || 'info', new Date().toISOString()]);
   res.status(201).json({ id, message: 'Alert created' });
 });
 
 router.delete('/alerts/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
-  await deleteDoc('alerts', req.params.id);
+  const db = await getDb();
+  run(db, `DELETE FROM alerts WHERE alert_id = ?`, [req.params.id]);
   res.json({ message: 'Alert deleted' });
 });
 

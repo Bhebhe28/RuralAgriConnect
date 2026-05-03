@@ -211,7 +211,7 @@ Get a free key at: https://aistudio.google.com/app/apikey
 
 ### Backend (API)
 - **Node.js** + Express + TypeScript
-- **SQL.js** (SQLite in-memory, persisted to file) — no external DB required
+- **Google Firestore** via Firebase Admin SDK
 - **JWT authentication** with bcrypt password hashing
 - **Google Gemini 2.0 Flash** — text chat + image vision analysis (auto-fallback to 2.5 Flash)
 - **OpenWeatherMap API** — live weather for 5 KZN regions
@@ -293,7 +293,7 @@ Open `server/.env` and fill in your API keys:
 ```env
 PORT=3001
 JWT_SECRET=ruragriconnect_secret_change_in_production
-DB_PATH=./data/ruragriconnect.db
+FIREBASE_SERVICE_ACCOUNT={"type":"service_account","project_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n","client_email":"..."}
 GEMINI_API_KEY=your_gemini_api_key_here
 OPENWEATHER_API_KEY=your_openweather_api_key_here
 ```
@@ -325,7 +325,7 @@ If you want demo data (sample farmers, advisories, alerts):
 ```bash
 npm run seed
 ```
-This creates demo accounts you can log in with immediately. **Note: this wipes existing data.**
+This seeds the backend if the users collection is empty.
 
 ---
 

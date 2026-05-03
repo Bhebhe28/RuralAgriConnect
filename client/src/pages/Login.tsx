@@ -183,6 +183,15 @@ export default function Login() {
                 <input className="input" type="password" value={password}
                   onChange={e => setPassword(e.target.value)}
                   placeholder="••••••••" required />
+                <div className="text-right mt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/forgot-password')}
+                    className="text-xs text-forest hover:underline bg-transparent border-0 cursor-pointer font-medium"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
               </div>
               <button type="submit" disabled={loading}
                 className="btn-primary w-full py-3.5 text-base mt-2 disabled:opacity-60 disabled:cursor-not-allowed">

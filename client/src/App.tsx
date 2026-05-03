@@ -5,6 +5,8 @@ import { LanguageProvider } from './context/LanguageContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import LandingPage from './pages/LandingPage';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
 import { AdvisoriesList, AdvisoryDetail } from './pages/Advisories';
 import Weather from './pages/Weather';
@@ -61,6 +63,8 @@ function AppRoutes() {
       {/* Landing page always shows at / — logged in users see "Go to Dashboard" in nav */}
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={token ? <Navigate to="/dashboard" replace /> : <Login />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password"  element={<ResetPassword />} />
 
       {/* Private routes — all under /app layout */}
       <Route element={<PrivateRoute><Layout /></PrivateRoute>}>
