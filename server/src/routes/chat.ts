@@ -36,7 +36,7 @@ function buildSystemPrompt(language = 'en') {
 }
 
 const MODELS = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash-lite', 'gemini-2.0-flash-001'];
-const VISION_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash-001'];
+const VISION_MODELS = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-lite'];
 
 function getModel(apiKey: string, modelName: string, language = 'en') {
   const genAI = new GoogleGenerativeAI(apiKey);
@@ -186,12 +186,17 @@ router.post('/scan', authenticate, upload.single('image'), async (req: AuthReque
 
   try {
     const mimeType = req.file.mimetype;
-    const supportedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif'];
-    const safeMime = supportedTypes.includes(mimeType) ? mimeType : 'image/jpeg';
+    const geminiTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!geminiTypes.includes(mimeType)) {
+      return res.json({
+        reply: '📸 Please upload a JPEG, PNG, or WebP image. iPhone HEIC photos can be converted by taking a screenshot first.',
+        hasDisease: false, diseaseName: '', severity: 'info',
+      });
+    }
 
     const imageData = {
       inlineData: {
-        mimeType: safeMime as 'image/jpeg' | 'image/png' | 'image/webp',
+        mimeType: mimeType as 'image/jpeg' | 'image/png' | 'image/webp',
         data: req.file.buffer.toString('base64'),
       },
     };
