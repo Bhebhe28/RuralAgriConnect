@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { login as apiLogin, register as apiRegister } from '../api';
 import { useLanguage } from '../context/LanguageContext';
 import { isValidEmail, isStrongPassword } from '../utils';
 import { useTheme } from '../context/ThemeContext';
@@ -9,7 +8,7 @@ import { useTheme } from '../context/ThemeContext';
 const REGIONS = ['eThekwini','uMgungundlovu','iLembe','Zululand','uThukela'];
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, register } = useAuth();
   const navigate = useNavigate();
   const { t, language, setLanguage } = useLanguage();
   const { isDark } = useTheme();
@@ -33,11 +32,15 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
-      const data = await apiLogin(email, password);
-      login(data.user, data.token);
+      await login(email, password);
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.error || t.loginFailed);
+      const code = err.code || '';
+      if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+        setError('Invalid email or password.');
+      } else {
+        setError(err.message || t.loginFailed);
+      }
     } finally {
       setLoading(false);
     }
@@ -46,17 +49,22 @@ export default function Login() {
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!isValidEmail(regEmail))       { setError('Please enter a valid email address.'); return; }
-    if (!isStrongPassword(regPwd))     { setError('Password must be 8+ chars with uppercase, lowercase and a number.'); return; }
-    if (regPwd !== regPwd2)            { setError(t.loginPasswordMismatch); return; }
+    if (!isValidEmail(regEmail))   { setError('Please enter a valid email address.'); return; }
+    if (!isStrongPassword(regPwd)) { setError('Password must be 8+ chars with uppercase, lowercase and a number.'); return; }
+    if (regPwd !== regPwd2)        { setError(t.loginPasswordMismatch); return; }
     setLoading(true);
     try {
-      await apiRegister({ name: regName, email: regEmail, phone: regPhone, password: regPwd, role: regRole, region: regRegion });
+      await register({ name: regName, email: regEmail, phone: regPhone, password: regPwd, role: regRole, region: regRegion });
       setTab('login');
       setEmail(regEmail);
       setError('✅ Account created! Sign in below.');
     } catch (err: any) {
-      setError(err.response?.data?.error || t.loginRegisterFailed);
+      const code = err.code || '';
+      if (code === 'auth/email-already-in-use') {
+        setError('This email is already registered.');
+      } else {
+        setError(err.message || t.loginRegisterFailed);
+      }
     } finally {
       setLoading(false);
     }

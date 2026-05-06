@@ -46,24 +46,26 @@ class ErrorBoundary extends React.Component<
 }
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const { token } = useAuth();
-  return token ? <>{children}</> : <Navigate to="/login" replace />;
+  const { user, loading } = useAuth();
+  if (loading) return null;
+  return user ? <>{children}</> : <Navigate to="/login" replace />;
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { token, isAdmin } = useAuth();
-  if (!token) return <Navigate to="/login" replace />;
+  const { user, isAdmin, loading } = useAuth();
+  if (loading) return null;
+  if (!user) return <Navigate to="/login" replace />;
   if (!isAdmin) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
 function AppRoutes() {
-  const { token } = useAuth();
+  const { user } = useAuth();
   return (
     <Routes>
       {/* Landing page always shows at / — logged in users see "Go to Dashboard" in nav */}
       <Route path="/" element={<LandingPage />} />
-      <Route path="/login" element={token ? <Navigate to="/dashboard" replace /> : <Login />} />
+      <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password"  element={<ResetPassword />} />
 

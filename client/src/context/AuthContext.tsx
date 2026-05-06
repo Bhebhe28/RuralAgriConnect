@@ -1,39 +1,117 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import type { User } from '../types';
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  updateProfile,
+  type User as FirebaseUser,
+} from 'firebase/auth';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../firebase';
+
+export interface AppUser {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  role: 'farmer' | 'admin';
+  region?: string;
+  avatar_url?: string;
+}
+
+interface RegisterData {
+  name: string;
+  email: string;
+  phone?: string;
+  password: string;
+  role?: string;
+  region?: string;
+}
 
 interface AuthContextType {
-  user: User | null;
-  token: string | null;
-  login: (user: User, token: string) => void;
-  logout: () => void;
+  user: AppUser | null;
+  firebaseUser: FirebaseUser | null;
+  loading: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  register: (data: RegisterData) => Promise<void>;
+  logout: () => Promise<void>;
   isAdmin: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    const stored = localStorage.getItem('user');
-    return stored ? JSON.parse(stored) : null;
-  });
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'));
+  const [user, setUser]               = useState<AppUser | null>(null);
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [loading, setLoading]         = useState(true);
 
-  const login = (u: User, t: string) => {
-    setUser(u);
-    setToken(t);
-    localStorage.setItem('user', JSON.stringify(u));
-    localStorage.setItem('token', t);
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser) {
+        setFirebaseUser(fbUser);
+        try {
+          const snap = await getDoc(doc(db, 'users', fbUser.uid));
+          if (snap.exists()) {
+            setUser({ id: fbUser.uid, ...snap.data() } as AppUser);
+          } else {
+            setUser({
+              id:    fbUser.uid,
+              name:  fbUser.displayName || fbUser.email?.split('@')[0] || 'User',
+              email: fbUser.email || '',
+              role:  'farmer',
+            });
+          }
+        } catch {
+          setUser({
+            id:    fbUser.uid,
+            name:  fbUser.displayName || 'User',
+            email: fbUser.email || '',
+            role:  'farmer',
+          });
+        }
+      } else {
+        setFirebaseUser(null);
+        setUser(null);
+      }
+      setLoading(false);
+    });
+    return unsub;
+  }, []);
+
+  const login = async (email: string, password: string) => {
+    await signInWithEmailAndPassword(auth, email, password);
   };
 
-  const logout = () => {
-    setUser(null);
-    setToken(null);
-    localStorage.removeItem('user');
-    localStorage.removeItem('token');
+  const register = async ({ name, email, phone, password, role, region }: RegisterData) => {
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
+    await updateProfile(cred.user, { displayName: name });
+    await setDoc(doc(db, 'users', cred.user.uid), {
+      name,
+      email,
+      phone:      phone || null,
+      role:       role || 'farmer',
+      region:     region || null,
+      avatar_url: null,
+      created_at: new Date().toISOString(),
+    });
+  };
+
+  const logout = async () => {
+    await signOut(auth);
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, isAdmin: user?.role === 'admin' }}>
+    <AuthContext.Provider value={{
+      user,
+      firebaseUser,
+      loading,
+      login,
+      register,
+      logout,
+      isAdmin: user?.role === 'admin',
+    }}>
       {children}
     </AuthContext.Provider>
   );
@@ -41,6 +119,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) return { user: null, token: null, login: () => {}, logout: () => {}, isAdmin: false };
+  if (!ctx) return {
+    user: null, firebaseUser: null, loading: false,
+    login: async () => {}, register: async () => {}, logout: async () => {},
+    isAdmin: false,
+  };
   return ctx;
 }
+
+export { sendPasswordResetEmail, auth };

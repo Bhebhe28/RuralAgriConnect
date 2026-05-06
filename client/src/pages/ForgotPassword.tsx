@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../api/client';
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { auth } from '../firebase';
 
 export default function ForgotPassword() {
   const navigate = useNavigate();
@@ -14,10 +15,15 @@ export default function ForgotPassword() {
     setError('');
     setLoading(true);
     try {
-      await api.post('/auth/forgot-password', { email });
+      await sendPasswordResetEmail(auth, email);
       setSent(true);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Something went wrong. Please try again.');
+      const code = err.code || '';
+      if (code === 'auth/user-not-found') {
+        setSent(true); // Don't reveal whether email exists
+      } else {
+        setError('Something went wrong. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -71,15 +77,10 @@ export default function ForgotPassword() {
         <div className="w-full max-w-md animate-scale-in">
 
           {sent ? (
-            /* ── Success state ── */
             <div className="text-center animate-fade-in">
-              <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">
-                📧
-              </div>
+              <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">📧</div>
               <h2 className="font-serif text-2xl text-dark mb-2">Check your email</h2>
-              <p className="text-muted text-sm mb-2">
-                We sent a password reset link to
-              </p>
+              <p className="text-muted text-sm mb-2">We sent a password reset link to</p>
               <p className="font-semibold text-forest text-sm mb-6">{email}</p>
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-sm text-emerald-800 mb-6 text-left">
                 <p className="font-semibold mb-1">📋 What to do next:</p>
@@ -97,20 +98,16 @@ export default function ForgotPassword() {
                   try again
                 </button>
               </p>
-              <button onClick={() => navigate('/login')}
-                className="btn-primary w-full py-3">
+              <button onClick={() => navigate('/login')} className="btn-primary w-full py-3">
                 Back to Sign In
               </button>
             </div>
 
           ) : (
-            /* ── Form state ── */
             <>
               <div className="mb-6">
                 <h2 className="font-serif text-2xl text-dark">Reset password</h2>
-                <p className="text-muted text-sm mt-1">
-                  Enter your account email and we'll send you a reset link.
-                </p>
+                <p className="text-muted text-sm mt-1">Enter your account email and we'll send you a reset link.</p>
               </div>
 
               {error && (
@@ -135,11 +132,8 @@ export default function ForgotPassword() {
                   />
                 </div>
 
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="btn-primary w-full py-3.5 text-base disabled:opacity-60 disabled:cursor-not-allowed"
-                >
+                <button type="submit" disabled={loading}
+                  className="btn-primary w-full py-3.5 text-base disabled:opacity-60 disabled:cursor-not-allowed">
                   {loading
                     ? <span className="flex items-center justify-center gap-2">
                         <span className="typing-dot"/><span className="typing-dot"/><span className="typing-dot"/>
@@ -148,10 +142,8 @@ export default function ForgotPassword() {
                 </button>
               </form>
 
-              <button
-                onClick={() => navigate('/login')}
-                className="w-full mt-4 text-sm text-muted hover:text-forest transition-colors bg-transparent border-0 cursor-pointer py-2"
-              >
+              <button onClick={() => navigate('/login')}
+                className="w-full mt-4 text-sm text-muted hover:text-forest transition-colors bg-transparent border-0 cursor-pointer py-2">
                 ← Back to Sign In
               </button>
             </>
