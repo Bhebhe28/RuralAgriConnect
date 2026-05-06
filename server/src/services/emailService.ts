@@ -1,24 +1,13 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // STARTTLS
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-  connectionTimeout: 10_000,
-  greetingTimeout: 10_000,
-  socketTimeout: 15_000,
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function sendPasswordResetEmail(to: string, resetToken: string) {
   const baseUrl = process.env.APP_URL || 'https://ruralagriconnect-15c7c.web.app';
   const resetUrl = `${baseUrl}/reset-password?token=${resetToken}`;
 
-  await transporter.sendMail({
-    from: `"RuralAgriConnect" <${process.env.EMAIL_USER}>`,
+  await resend.emails.send({
+    from: 'RuralAgriConnect <onboarding@resend.dev>',
     to,
     subject: 'Reset your RuralAgriConnect password',
     html: `
