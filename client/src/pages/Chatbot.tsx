@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import api from '../api/client';
+import { sendChatMessage, scanImage } from '../services/ai';
 import { useLanguage } from '../context/LanguageContext';
 
 interface Message {
@@ -62,17 +62,10 @@ export default function Chatbot() {
     setTyping(true);
 
     try {
-      const formData = new FormData();
-      formData.append('image', imageFile);
-      formData.append('prompt', prompt);
-      formData.append('language', language);
-      const { data } = await api.post('/chat/scan', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      setMessages(prev => [...prev, { role: 'bot', text: data.reply }]);
-    } catch (err: any) {
-      const msg = err.response?.data?.error || t.chatImageError;
-      setMessages(prev => [...prev, { role: 'bot', text: `❌ ${msg}` }]);
+      const result = await scanImage(imageFile, prompt, language);
+      setMessages(prev => [...prev, { role: 'bot', text: result.reply }]);
+    } catch {
+      setMessages(prev => [...prev, { role: 'bot', text: `❌ ${t.chatImageError}` }]);
     } finally {
       setTyping(false);
     }
@@ -89,13 +82,13 @@ export default function Chatbot() {
     setTyping(true);
 
     try {
-      const { data } = await api.post('/chat', { message: text, history, language });
+      const reply = await sendChatMessage(text, history, language);
       setHistory(prev => [
         ...prev,
         { role: 'user',  parts: [{ text }] },
-        { role: 'model', parts: [{ text: data.reply }] },
+        { role: 'model', parts: [{ text: reply }] },
       ]);
-      setMessages(prev => [...prev, { role: 'bot', text: data.reply }]);
+      setMessages(prev => [...prev, { role: 'bot', text: reply }]);
     } catch {
       setMessages(prev => [...prev, { role: 'bot', text: t.chatOfflineError }]);
     } finally {
