@@ -3,6 +3,8 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useOffline } from '../hooks/useOffline';
 import { useLanguage, type Language } from '../context/LanguageContext';
+import { useTheme } from '../context/ThemeContext';
+import ThemeToggle from './ThemeToggle';
 
 const LANGUAGES: { code: Language; flag: string; label: string }[] = [
   { code: 'en', flag: '🇬🇧', label: 'EN' },
@@ -65,11 +67,12 @@ export default function Layout() {
     { to: '/notifications', icon: '🔔', label: 'Alerts' },
   ];
 
+  const { isDark } = useTheme();
   const handleLogout = () => { logout(); navigate('/'); };
   const currentLang = LANGUAGES.find(l => l.code === language)!;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-cream overscroll-none touch-pan-y" style={{ overscrollBehavior: 'none' }}>
+    <div className={`flex h-screen overflow-hidden overscroll-none touch-pan-y ${isDark ? 'bg-night-bg' : 'bg-cream'}`} style={{ overscrollBehavior: 'none' }}>
 
       {/* ── Offline banner ── */}
       {isOffline && (
@@ -170,44 +173,41 @@ export default function Layout() {
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
 
         {/* Topbar */}
-        <header className={`bg-white border-b border-sand px-3 md:px-6 flex items-center justify-between
-                           sticky z-10 transition-all ${isOffline ? 'top-8' : 'top-0'}`}
+        <header className={`border-b px-3 md:px-6 flex items-center justify-between sticky z-10 transition-all ${isOffline ? 'top-8' : 'top-0'} ${isDark ? 'bg-night-surface border-night-border' : 'bg-white border-sand'}`}
                 style={{ paddingTop: `calc(env(safe-area-inset-top, 0px) + 0.75rem)`, paddingBottom: '0.75rem' }}>
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
             {/* Mobile hamburger */}
             <button onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="md:hidden w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-xl
-                         bg-cream border border-sand text-forest text-lg transition-colors
-                         hover:bg-sand active:scale-95">
+              className={`md:hidden w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-xl text-lg transition-colors active:scale-95 border ${isDark ? 'bg-night-card border-night-border text-night-primary hover:bg-night-surface' : 'bg-cream border-sand text-forest hover:bg-sand'}`}>
               {sidebarOpen ? '✕' : '☰'}
             </button>
             {/* Logo text — desktop */}
             <div className="hidden md:flex items-center gap-2">
               <div className="w-7 h-7 bg-forest rounded-lg flex items-center justify-center text-sm">🌿</div>
-              <span className="font-serif text-forest text-base font-bold">RurAgriConnect</span>
+              <span className={`font-serif text-base font-bold ${isDark ? 'text-night-primary' : 'text-forest'}`}>RurAgriConnect</span>
             </div>
-            {/* Page title — mobile */}
-            <span className="md:hidden font-serif text-forest text-sm font-bold truncate">RurAgriConnect</span>
+            <span className={`md:hidden font-serif text-sm font-bold truncate ${isDark ? 'text-night-primary' : 'text-forest'}`}>RurAgriConnect</span>
           </div>
 
           <div className="flex items-center gap-1.5 md:gap-3 flex-shrink-0">
+            {/* ── Day / Night toggle ── */}
+            <ThemeToggle />
+
             {/* Language switcher */}
             <div className="relative" ref={langRef}>
               <button onClick={() => setLangOpen(o => !o)}
-                className="flex items-center gap-1 md:gap-1.5 bg-cream border border-sand rounded-full px-2 md:px-3 py-1.5 md:py-2
-                           text-sm font-medium hover:border-moss transition-colors active:scale-95">
+                className={`flex items-center gap-1 md:gap-1.5 rounded-full px-2 md:px-3 py-1.5 md:py-2 text-sm font-medium hover:border-moss transition-colors active:scale-95 border ${isDark ? 'bg-night-card border-night-border text-night-muted' : 'bg-cream border-sand text-muted'}`}>
                 <span className="text-base">{currentLang.flag}</span>
-                <span className="text-muted text-xs hidden sm:block">{currentLang.label}</span>
-                <span className="text-muted text-xs">▾</span>
+                <span className="text-xs hidden sm:block">{currentLang.label}</span>
+                <span className="text-xs">▾</span>
               </button>
               {langOpen && (
-                <div className="absolute right-0 top-full mt-2 bg-white border border-sand rounded-2xl shadow-xl z-50 overflow-hidden min-w-40 animate-scale-in">
-                  <p className="px-4 pt-3 pb-1 text-[10px] uppercase tracking-widest text-muted font-bold">{t.language}</p>
+                <div className={`absolute right-0 top-full mt-2 rounded-2xl shadow-xl z-50 overflow-hidden min-w-40 animate-scale-in border ${isDark ? 'bg-night-card border-night-border' : 'bg-white border-sand'}`}>
+                  <p className={`px-4 pt-3 pb-1 text-[10px] uppercase tracking-widest font-bold ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.language}</p>
                   {LANGUAGES.map(lang => (
                     <button key={lang.code}
                       onClick={() => { setLanguage(lang.code); setLangOpen(false); }}
-                      className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-cream transition-colors text-left
-                        ${language === lang.code ? 'font-semibold text-forest' : 'text-dark'}`}>
+                      className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors text-left ${isDark ? 'hover:bg-night-surface' : 'hover:bg-cream'} ${language === lang.code ? 'font-semibold text-forest' : isDark ? 'text-night-text' : 'text-dark'}`}>
                       <span>{lang.flag}</span>
                       <span>{t[`lang${lang.code.charAt(0).toUpperCase() + lang.code.slice(1)}` as keyof typeof t]}</span>
                       {language === lang.code && <span className="ml-auto text-moss text-xs">✓</span>}
@@ -219,28 +219,26 @@ export default function Layout() {
 
             {/* Weather shortcut — desktop only */}
             <NavLink to="/weather"
-              className="hidden sm:flex items-center gap-1.5 bg-cream border border-sand rounded-full px-3 py-2
-                         text-sm font-medium hover:border-moss transition-colors text-muted hover:text-forest">
+              className={`hidden sm:flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium hover:border-moss transition-colors border ${isDark ? 'bg-night-card border-night-border text-night-muted hover:text-night-primary' : 'bg-cream border-sand text-muted hover:text-forest'}`}>
               ⛅ <span className="hidden md:block text-xs">{t.navWeather}</span>
             </NavLink>
 
             {/* Notifications bell */}
             <NavLink to="/notifications"
-              className="relative w-9 h-9 flex items-center justify-center rounded-full
-                         bg-cream border border-sand hover:border-moss transition-colors text-xl active:scale-95">
+              className={`relative w-9 h-9 flex items-center justify-center rounded-full hover:border-moss transition-colors text-xl active:scale-95 border ${isDark ? 'bg-night-card border-night-border' : 'bg-cream border-sand'}`}>
               🔔
-              <span className="absolute top-0.5 right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white" />
+              <span className={`absolute top-0.5 right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 ${isDark ? 'border-night-surface' : 'border-white'}`} />
             </NavLink>
           </div>
         </header>
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto bg-cream pb-20 md:pb-0 min-w-0 overscroll-none">
+        <main className={`flex-1 overflow-y-auto pb-20 md:pb-0 min-w-0 overscroll-none ${isDark ? 'bg-night-bg' : 'bg-cream'}`}>
           <Outlet />
         </main>
 
         {/* ── Mobile bottom nav ── */}
-        <nav className="md:hidden fixed bottom-0 inset-x-0 z-20 bg-white border-t border-sand"
+        <nav className={`md:hidden fixed bottom-0 inset-x-0 z-20 border-t ${isDark ? 'bg-night-surface border-night-border' : 'bg-white border-sand'}`}
              style={{ paddingBottom: 'env(safe-area-inset-bottom, 8px)' }}>
           <div className="flex items-center justify-around px-1 pt-1.5 pb-1">
             {bottomNav.map(item => {
@@ -251,7 +249,7 @@ export default function Layout() {
                   <span className={`text-xl transition-transform duration-200 ${isActive ? 'scale-110' : ''}`}>
                     {item.icon}
                   </span>
-                  <span className={`text-[10px] truncate w-full text-center ${isActive ? 'text-forest font-bold' : 'text-muted'}`}>
+                  <span className={`text-[10px] truncate w-full text-center ${isActive ? (isDark ? 'text-night-primary font-bold' : 'text-forest font-bold') : (isDark ? 'text-night-muted' : 'text-muted')}`}>
                     {item.label}
                   </span>
                 </NavLink>

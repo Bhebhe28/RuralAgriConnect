@@ -33,12 +33,13 @@ router.post('/login', async (req: Request, res: Response) => {
   res.json({
     token,
     user: {
-      id:     user.user_id,
-      name:   user.full_name,
-      email:  user.email,
-      phone:  user.phone_number,
-      role:   user.role || 'farmer',
-      region: user.region || null,
+      id:         user.user_id,
+      name:       user.full_name,
+      email:      user.email,
+      phone:      user.phone_number,
+      role:       user.role || 'farmer',
+      region:     user.region || null,
+      avatar_url: user.avatar_url || null,
     }
   });
 });

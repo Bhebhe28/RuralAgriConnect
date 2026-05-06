@@ -62,6 +62,10 @@
   .mobile-nav-item.active { @apply text-forest bg-moss/10; }
 }
 
+/* Dark nav overrides (can't use @apply inside non-layer block) */
+.dark .mobile-nav-item       { color: #81C784; }
+.dark .mobile-nav-item.active { color: #66BB6A !important; background-color: rgba(102,187,106,0.15) !important; }
+
 /* ── Animations ── */
 @keyframes fadeIn      { from { opacity:0; transform:translateY(10px); }  to { opacity:1; transform:translateY(0); } }
 @keyframes fadeInUp    { from { opacity:0; transform:translateY(20px); }  to { opacity:1; transform:translateY(0); } }
@@ -117,6 +121,54 @@
 /* Safe area */
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 16px); }
 .safe-top    { padding-top: env(safe-area-inset-top, 0px); }
+
+/* ── Night mode global overrides ─────────────────────────────────────────────
+   These cascade to every page without touching each file individually.        */
+.dark body          { background-color: #0F1A0F; color: #E8F5E9; }
+
+/* Surfaces */
+.dark .card         { background-color: #223322; border-color: #2E4D2E; color: #E8F5E9; }
+.dark .page         { color: #E8F5E9; }
+
+/* Form elements */
+.dark .input        { background-color: #223322; border-color: #2E4D2E; color: #E8F5E9; }
+.dark .input::placeholder { color: rgba(129,199,132,0.5); }
+
+/* Buttons */
+.dark .btn-primary  { background-color: #66BB6A; color: #051005; }
+.dark .btn-primary:hover { background-color: #81C784; }
+.dark .btn-outline  { border-color: #2E4D2E; color: #A5D6A7; }
+.dark .btn-outline:hover { border-color: #66BB6A; color: #66BB6A; background-color: rgba(102,187,106,0.05); }
+
+/* Badges */
+.dark .badge-green  { background-color: rgba(102,187,106,0.15); color: #81C784; }
+.dark .badge-blue   { background-color: rgba(66,165,245,0.15);  color: #90CAF9; }
+.dark .badge-orange { background-color: rgba(255,167,38,0.15);  color: #FFB74D; }
+.dark .badge-red    { background-color: rgba(239,83,80,0.15);   color: #EF9A9A; }
+
+/* Common background patterns — exclude buttons/inputs to avoid killing their text contrast */
+.dark div.bg-white, .dark section.bg-white, .dark li.bg-white,
+.dark article.bg-white, .dark aside.bg-white, .dark header.bg-white,
+.dark main.bg-white, .dark nav.bg-white { background-color: #223322 !important; }
+.dark .bg-cream     { background-color: #1A2E1A !important; }
+.dark .bg-sand      { background-color: #2E4D2E !important; }
+.dark .border-sand  { border-color: #2E4D2E !important; }
+
+/* Text colours — ensure all named colours flip to readable equivalents */
+.dark .text-dark    { color: #E8F5E9 !important; }
+.dark .text-muted   { color: #A5D6A7 !important; }
+.dark .text-forest  { color: #66BB6A !important; }
+.dark .text-moss    { color: #95D5B2 !important; }
+.dark .text-earth   { color: #FFB74D !important; }
+
+/* Skeleton shimmer in dark */
+.dark .skeleton {
+  background: linear-gradient(90deg, #2E4D2E 25%, #223322 50%, #2E4D2E 75%);
+  background-size: 200% 100%;
+}
+
+/* Scrollbar in dark */
+.dark ::-webkit-scrollbar-thumb { background: #2E4D2E; }
 
 /* Mobile overflow */
 #root {

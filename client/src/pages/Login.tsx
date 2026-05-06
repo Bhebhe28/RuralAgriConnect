@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { login as apiLogin, register as apiRegister } from '../api';
 import { useLanguage } from '../context/LanguageContext';
 import { isValidEmail, isStrongPassword } from '../utils';
+import { useTheme } from '../context/ThemeContext';
 
 const REGIONS = ['eThekwini','uMgungundlovu','iLembe','Zululand','uThukela'];
 
@@ -11,6 +12,7 @@ export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const { t, language, setLanguage } = useLanguage();
+  const { isDark } = useTheme();
   const [tab, setTab] = useState<'login' | 'register'>('login');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -61,7 +63,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row">
+    <div className={`min-h-screen flex flex-col md:flex-row ${isDark ? 'bg-night-bg' : ''}`}>
 
       {/* ── Left panel — branding ── */}
       <div className="hidden md:flex md:w-5/12 lg:w-1/2 bg-gradient-to-br from-forest via-forest-mid to-moss
@@ -111,14 +113,14 @@ export default function Login() {
       </div>
 
       {/* ── Right panel — form ── */}
-      <div className="flex-1 flex flex-col justify-center items-center p-6 md:p-10 bg-cream min-h-screen md:min-h-0">
+      <div className={`flex-1 flex flex-col justify-center items-center p-6 md:p-10 min-h-screen md:min-h-0 ${isDark ? 'bg-night-bg' : 'bg-cream'}`}>
 
         {/* Mobile logo */}
         <div className="md:hidden flex items-center gap-3 mb-8 animate-fade-in">
-          <div className="w-10 h-10 bg-forest rounded-xl flex items-center justify-center text-xl">🌿</div>
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl ${isDark ? 'bg-night-card border border-night-border' : 'bg-forest'}`}>🌿</div>
           <div>
-            <h1 className="font-serif text-forest text-lg font-bold leading-none">RurAgriConnect</h1>
-            <p className="text-muted text-xs">KwaZulu-Natal</p>
+            <h1 className={`font-serif text-lg font-bold leading-none ${isDark ? 'text-night-primary' : 'text-forest'}`}>RurAgriConnect</h1>
+            <p className={`text-xs ${isDark ? 'text-night-muted' : 'text-muted'}`}>KwaZulu-Natal</p>
           </div>
         </div>
 
@@ -126,10 +128,10 @@ export default function Login() {
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className="font-serif text-2xl text-dark">
+              <h2 className={`font-serif text-2xl ${isDark ? 'text-night-text' : 'text-dark'}`}>
                 {tab === 'login' ? 'Welcome back' : 'Create account'}
               </h2>
-              <p className="text-muted text-sm mt-0.5">
+              <p className={`text-sm mt-0.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>
                 {tab === 'login' ? 'Sign in to your farm advisory' : 'Join thousands of KZN farmers'}
               </p>
             </div>
@@ -140,7 +142,10 @@ export default function Login() {
                   className={`text-xs px-2.5 py-1.5 rounded-lg border-2 transition-all font-semibold
                     ${language === code
                       ? 'bg-forest text-white border-forest'
-                      : 'border-sand text-muted hover:border-moss bg-white'}`}>
+                      : isDark
+                        ? 'border-night-border text-night-muted hover:border-night-primary bg-night-card'
+                        : 'border-sand text-muted hover:border-moss bg-white'
+                    }`}>
                   {code.toUpperCase()}
                 </button>
               ))}
@@ -148,11 +153,18 @@ export default function Login() {
           </div>
 
           {/* Tabs */}
-          <div className="flex bg-sand rounded-2xl p-1 mb-6">
+          <div className={`flex rounded-2xl p-1 mb-6 ${isDark ? 'bg-night-card' : 'bg-sand'}`}>
             {(['login','register'] as const).map(t_ => (
               <button key={t_} onClick={() => { setTab(t_); setError(''); }}
                 className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all
-                  ${tab === t_ ? 'bg-white text-forest shadow-sm' : 'text-muted hover:text-dark'}`}>
+                  ${tab === t_
+                    ? isDark
+                      ? 'bg-night-surface text-night-text border border-night-border shadow-sm'
+                      : 'bg-white text-forest shadow-sm'
+                    : isDark
+                      ? 'text-night-muted hover:text-night-text'
+                      : 'text-muted hover:text-dark'
+                  }`}>
                 {t_ === 'login' ? t.loginTitle : t.loginRegister}
               </button>
             ))}
@@ -173,13 +185,13 @@ export default function Login() {
           {tab === 'login' ? (
             <form onSubmit={handleLogin} className="space-y-4 animate-fade-in">
               <div>
-                <label className="block text-xs font-bold text-muted uppercase tracking-widest mb-1.5">{t.loginEmail}</label>
+                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginEmail}</label>
                 <input className="input" type="email" value={email}
                   onChange={e => setEmail(e.target.value)}
                   placeholder="farmer@example.com" required />
               </div>
               <div>
-                <label className="block text-xs font-bold text-muted uppercase tracking-widest mb-1.5">{t.loginPassword}</label>
+                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginPassword}</label>
                 <input className="input" type="password" value={password}
                   onChange={e => setPassword(e.target.value)}
                   placeholder="••••••••" required />
@@ -187,7 +199,7 @@ export default function Login() {
                   <button
                     type="button"
                     onClick={() => navigate('/forgot-password')}
-                    className="text-xs text-forest hover:underline bg-transparent border-0 cursor-pointer font-medium"
+                    className={`text-xs hover:underline bg-transparent border-0 cursor-pointer font-medium ${isDark ? 'text-night-primary' : 'text-forest'}`}
                   >
                     Forgot password?
                   </button>
@@ -199,9 +211,9 @@ export default function Login() {
                   ? <span className="flex items-center justify-center gap-2"><span className="typing-dot"/><span className="typing-dot"/><span className="typing-dot"/></span>
                   : t.loginBtn}
               </button>
-              <div className="bg-sand/60 rounded-xl px-4 py-3 text-center">
-                <p className="text-xs text-muted">Demo account</p>
-                <p className="text-xs font-semibold text-forest mt-0.5">admin@farm.co.za · Admin@123</p>
+              <div className={`rounded-xl px-4 py-3 text-center ${isDark ? 'bg-night-card border border-night-border' : 'bg-sand/60'}`}>
+                <p className={`text-xs ${isDark ? 'text-night-muted' : 'text-muted'}`}>Demo account</p>
+                <p className={`text-xs font-semibold mt-0.5 ${isDark ? 'text-night-primary' : 'text-forest'}`}>admin@farm.co.za · Admin@123</p>
               </div>
             </form>
 
@@ -209,30 +221,30 @@ export default function Login() {
             /* ── Register form ── */
             <form onSubmit={handleRegister} className="space-y-4 animate-fade-in">
               <div>
-                <label className="block text-xs font-bold text-muted uppercase tracking-widest mb-1.5">{t.loginFullName}</label>
+                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginFullName}</label>
                 <input className="input" value={regName} onChange={e => setRegName(e.target.value)}
                   placeholder="Sipho Dlamini" required />
               </div>
               <div>
-                <label className="block text-xs font-bold text-muted uppercase tracking-widest mb-1.5">{t.loginEmail}</label>
+                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginEmail}</label>
                 <input className="input" type="email" value={regEmail} onChange={e => setRegEmail(e.target.value)}
                   placeholder="sipho@farm.co.za" required />
               </div>
               <div>
-                <label className="block text-xs font-bold text-muted uppercase tracking-widest mb-1.5">{t.loginPhone}</label>
+                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginPhone}</label>
                 <input className="input" type="tel" value={regPhone} onChange={e => setRegPhone(e.target.value)}
                   placeholder="+27 83 000 0000" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-muted uppercase tracking-widest mb-1.5">{t.loginRole}</label>
+                  <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginRole}</label>
                   <select className="input" value={regRole} onChange={e => setRegRole(e.target.value)}>
                     <option value="farmer">🌾 Farmer</option>
                     <option value="admin">⚙️ Admin</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-muted uppercase tracking-widest mb-1.5">{t.loginRegion}</label>
+                  <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginRegion}</label>
                   <select className="input" value={regRegion} onChange={e => setRegRegion(e.target.value)}>
                     {REGIONS.map(r => (
                       <option key={r} value={`KwaZulu-Natal — ${r}`}>{r}</option>
@@ -242,12 +254,12 @@ export default function Login() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-muted uppercase tracking-widest mb-1.5">{t.loginPassword}</label>
+                  <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginPassword}</label>
                   <input className="input" type="password" value={regPwd} onChange={e => setRegPwd(e.target.value)}
                     placeholder="Min 8 chars" required />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-muted uppercase tracking-widest mb-1.5">Confirm</label>
+                  <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>Confirm</label>
                   <input className="input" type="password" value={regPwd2} onChange={e => setRegPwd2(e.target.value)}
                     placeholder="Repeat" required />
                 </div>
@@ -263,7 +275,7 @@ export default function Login() {
 
           {/* Back to landing */}
           <button onClick={() => navigate('/')}
-            className="w-full mt-4 text-sm text-muted hover:text-forest transition-colors bg-transparent border-0 cursor-pointer py-2">
+            className={`w-full mt-4 text-sm transition-colors bg-transparent border-0 cursor-pointer py-2 ${isDark ? 'text-night-muted hover:text-night-primary' : 'text-muted hover:text-forest'}`}>
             ← Back to home
           </button>
         </div>

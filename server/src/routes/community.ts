@@ -46,7 +46,9 @@ router.post('/', authenticate, upload.single('image'), async (req: AuthRequest, 
   const { title, body, category } = req.body;
   if (!title || !body) return res.status(400).json({ error: 'title and body are required' });
 
-  const imageUrl = req.file ? `/community/${req.file.filename}` : null;
+  const proto = (req.get('x-forwarded-proto') || req.protocol).split(',')[0].trim();
+  const host  = req.get('host');
+  const imageUrl = req.file ? `${proto}://${host}/community/${req.file.filename}` : null;
   const db = await getDb();
   const id = uuidv4();
   const now = new Date().toISOString();
@@ -59,7 +61,9 @@ router.post('/:id/replies', authenticate, upload.single('image'), async (req: Au
   const { body } = req.body;
   if (!body) return res.status(400).json({ error: 'body is required' });
 
-  const imageUrl = req.file ? `/community/${req.file.filename}` : null;
+  const proto = (req.get('x-forwarded-proto') || req.protocol).split(',')[0].trim();
+  const host  = req.get('host');
+  const imageUrl = req.file ? `${proto}://${host}/community/${req.file.filename}` : null;
   const db = await getDb();
   const id = uuidv4();
   run(db, `INSERT INTO community_replies (reply_id, post_id, user_id, body, image_url, created_at) VALUES (?,?,?,?,?,?)`,

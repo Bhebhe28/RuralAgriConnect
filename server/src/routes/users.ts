@@ -41,7 +41,9 @@ router.put('/me', authenticate, async (req: AuthRequest, res: Response) => {
 
 router.post('/me/avatar', authenticate, upload.single('avatar'), async (req: AuthRequest, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
-  const avatarUrl = `/avatars/${req.file.filename}`;
+  const proto = (req.get('x-forwarded-proto') || req.protocol).split(',')[0].trim();
+  const host  = req.get('host');
+  const avatarUrl = `${proto}://${host}/avatars/${req.file.filename}`;
   const db = await getDb();
   run(db, `UPDATE users SET avatar_url = ? WHERE user_id = ?`, [avatarUrl, req.user!.id]);
   res.json({ avatar_url: avatarUrl, message: 'Avatar updated' });

@@ -201,7 +201,23 @@ export async function initDb() {
       expires_at TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS crop_scans (
+      scan_id     TEXT PRIMARY KEY,
+      user_id     TEXT REFERENCES users(user_id) ON DELETE CASCADE,
+      user_name   TEXT,
+      region      TEXT,
+      diagnosis   TEXT NOT NULL,
+      crop_type   TEXT DEFAULT 'Crops',
+      disease_name TEXT,
+      has_disease INTEGER DEFAULT 0,
+      severity    TEXT DEFAULT 'info',
+      created_at  TEXT DEFAULT (datetime('now'))
+    );
   `);
+
+  // Migrations — safe to run on every startup (ALTER TABLE ignored if column exists)
+  try { db.run(`ALTER TABLE pest_outbreaks ADD COLUMN source TEXT DEFAULT 'admin'`); } catch { /* already exists */ }
 
   // Ensure default roles exist (for legacy role_id column if needed)
   const existingRoles = query(db, `SELECT role_name FROM roles`);

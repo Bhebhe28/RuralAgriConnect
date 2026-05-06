@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { updateMe } from '../api';
 import { useLanguage } from '../context/LanguageContext';
 import api from '../api/client';
+import { imgUrl } from '../utils/imgUrl';
 
 export default function Profile() {
   const { user, login } = useAuth();
@@ -10,9 +11,10 @@ export default function Profile() {
   const [name, setName]     = useState(user?.name || '');
   const [phone, setPhone]   = useState(user?.phone || '');
   const [region, setRegion] = useState(user?.region || '');
-  const [saved, setSaved]   = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [saved, setSaved]         = useState(false);
+  const [loading, setLoading]     = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarError, setAvatarError] = useState('');
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,24 +34,22 @@ export default function Profile() {
     if (!file) return;
 
     setAvatarUploading(true);
+    setAvatarError('');
     try {
       const formData = new FormData();
       formData.append('avatar', file);
-      
-      const response = await api.post('/users/me/avatar', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      
-      // Update user context with new avatar
+      // Do NOT set Content-Type manually — Axios must auto-set multipart/form-data with boundary
+      const response = await api.post('/users/me/avatar', formData);
+
       if (user) {
         const updatedUser = { ...user, avatar_url: response.data.avatar_url };
         login(updatedUser, localStorage.getItem('token')!);
       }
-      
+
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
-    } catch (error) {
-      console.error('Avatar upload failed:', error);
+    } catch (err: any) {
+      setAvatarError(err.response?.data?.error || 'Photo upload failed. Please try again.');
     } finally {
       setAvatarUploading(false);
     }
@@ -62,9 +62,14 @@ export default function Profile() {
         <div className="relative">
           <div className="w-20 h-20 rounded-full bg-moss flex items-center justify-center text-4xl border-4 border-white/30 overflow-hidden">
             {user?.avatar_url ? (
-              <img 
-                src={user.avatar_url} 
-                alt="Profile" 
+              <img
+                src={imgUrl(user.avatar_url)}
+                alt="Profile"
+                loading="eager"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  e.currentTarget.parentElement!.innerHTML += '<span style="font-size:2.25rem">👤</span>';
+                }}
                 className="w-full h-full object-cover"
               />
             ) : (
@@ -94,6 +99,12 @@ export default function Profile() {
           </span>
         </div>
       </div>
+
+      {avatarError && (
+        <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl px-4 py-3 mb-4 text-sm max-w-lg">
+          ⚠ {avatarError}
+        </div>
+      )}
 
       {/* Edit form */}
       <div className="card max-w-lg">

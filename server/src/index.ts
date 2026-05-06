@@ -14,7 +14,7 @@ import userRoutes         from './routes/users';
 import notificationRoutes from './routes/notifications';
 import syncRoutes         from './routes/sync';
 import chatRoutes         from './routes/chat';
-import outbreakRoutes     from './routes/outbreaks';
+import outbreakRoutes, { syncOutbreaksAndNotify } from './routes/outbreaks';
 import communityRoutes    from './routes/community';
 import yieldRoutes        from './routes/yields';
 import subsidyRoutes      from './routes/subsidies';
@@ -36,6 +36,10 @@ async function bootstrap() {
   // Start weather refresh
   setTimeout(() => fetchAndSaveWeather().catch(console.error), 5000);
   setInterval(() => fetchAndSaveWeather().catch(console.error), 30 * 60 * 1000);
+
+  // Live outbreak feed — sync on startup (after 15s) then every 24 hours
+  setTimeout(() => syncOutbreaksAndNotify().catch(console.error), 15_000);
+  setInterval(() => syncOutbreaksAndNotify().catch(console.error), 24 * 60 * 60 * 1000);
 
   // Middleware
   app.use(helmet({ contentSecurityPolicy: false }));

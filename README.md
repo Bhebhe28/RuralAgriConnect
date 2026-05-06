@@ -347,6 +347,26 @@ This seeds the backend if the users collection is empty.
 
 ---
 
+### Troubleshooting
+
+#### Port 3001 already in use (`EADDRINUSE`)
+A previous server process is still running. Kill it with:
+```cmd
+for /f "tokens=5" %a in ('netstat -ano ^| findstr :3001') do taskkill /PID %a /F
+```
+Then run `npm run dev` again.
+
+Or manually:
+```cmd
+netstat -ano | findstr :3001
+```
+Copy the PID number from the result, then:
+```cmd
+taskkill /PID <number> /F
+```
+
+---
+
 ### Installing on Your Phone (PWA)
 1. Make sure your phone is on the same WiFi as your computer
 2. Find your computer's local IP (run `ipconfig` on Windows, look for IPv4)

@@ -14,7 +14,7 @@ interface GeminiHistory {
 }
 
 export default function Chatbot() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const SUGGESTIONS = [
     t.chatSuggestion1,
     t.chatSuggestion2,
@@ -65,6 +65,7 @@ export default function Chatbot() {
       const formData = new FormData();
       formData.append('image', imageFile);
       formData.append('prompt', prompt);
+      formData.append('language', language);
       const { data } = await api.post('/chat/scan', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -88,7 +89,7 @@ export default function Chatbot() {
     setTyping(true);
 
     try {
-      const { data } = await api.post('/chat', { message: text, history });
+      const { data } = await api.post('/chat', { message: text, history, language });
       setHistory(prev => [
         ...prev,
         { role: 'user',  parts: [{ text }] },
@@ -123,7 +124,7 @@ export default function Chatbot() {
                   ? 'bg-forest text-white rounded-br-sm'
                   : 'bg-white border border-sand rounded-bl-sm'}`}>
                 {m.image && (
-                  <img src={m.image} alt="uploaded crop" className="w-full max-h-48 object-cover rounded-t-2xl" />
+                  <img src={m.image} alt="uploaded crop" loading="lazy" className="w-full max-h-48 object-cover rounded-t-2xl" />
                 )}
                 <p className="px-4 py-3 whitespace-pre-wrap">{m.text}</p>
               </div>
@@ -144,7 +145,7 @@ export default function Chatbot() {
         {/* Image preview bar */}
         {imagePreview && (
           <div className="flex items-center gap-3 bg-sand rounded-xl px-3 py-2 mb-3">
-            <img src={imagePreview} alt="preview" className="w-14 h-14 object-cover rounded-lg flex-shrink-0" />
+            <img src={imagePreview} alt="preview" loading="lazy" className="w-14 h-14 object-cover rounded-lg flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-forest">{t.chatImageReady}</p>
               <p className="text-xs text-muted truncate">{imageFile?.name}</p>

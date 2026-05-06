@@ -29,6 +29,116 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   res.json(rows.map(r => ({ ...r, id: r.weather_id })));
 });
 
+router.get('/suggest', authenticate, async (req: AuthRequest, res: Response) => {
+  const { q } = req.query as { q?: string };
+  if (!q || q.trim().length < 2) return res.json([]);
+
+  const apiKey = process.env.OPENWEATHER_API_KEY;
+  if (!apiKey || apiKey === 'your_openweather_api_key_here') {
+    return res.json([
+      { displayName: 'Durban, KwaZulu-Natal, ZA', name: 'Durban', state: 'KwaZulu-Natal', country: 'ZA', lat: -29.8587, lon: 31.0218 },
+      { displayName: 'Durbanville, Western Cape, ZA', name: 'Durbanville', state: 'Western Cape', country: 'ZA', lat: -33.8351, lon: 18.6501 },
+    ].filter(s => s.name.toLowerCase().startsWith(q.trim().toLowerCase())));
+  }
+
+  try {
+    const url = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(q.trim())}&limit=6&appid=${apiKey}`;
+    const r = await fetch(url);
+    if (!r.ok) return res.json([]);
+    const data = await r.json() as any[];
+    res.json(data.map(item => ({
+      name:        item.name,
+      state:       item.state || '',
+      country:     item.country || '',
+      lat:         item.lat,
+      lon:         item.lon,
+      displayName: [item.name, item.state, item.country].filter(Boolean).join(', '),
+    })));
+  } catch {
+    res.json([]);
+  }
+});
+
+router.get('/city', authenticate, async (req: AuthRequest, res: Response) => {
+  const { q } = req.query as { q?: string };
+  if (!q?.trim()) return res.status(400).json({ error: 'City name required' });
+
+  const apiKey = process.env.OPENWEATHER_API_KEY;
+  if (!apiKey || apiKey === 'your_openweather_api_key_here') {
+    return res.json({
+      city: q, country: '', region: q,
+      temperature: 22, feels_like: 23, humidity: 65,
+      rainfall: 0, wind_speed: 12,
+      description: 'Partly cloudy', icon: '02d',
+      forecast_date: new Date().toISOString().split('T')[0],
+    });
+  }
+
+  try {
+    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(q.trim())}&appid=${apiKey}&units=metric`;
+    const owRes = await fetch(url);
+    if (owRes.status === 404) return res.status(404).json({ error: `City "${q}" not found. Try a different name.` });
+    if (!owRes.ok) throw new Error(`OpenWeather HTTP ${owRes.status}`);
+    const d = await owRes.json() as any;
+    res.json({
+      city:        d.name,
+      country:     d.sys?.country || '',
+      region:      `${d.name}${d.sys?.country ? ', ' + d.sys.country : ''}`,
+      temperature:   Math.round(d.main.temp),
+      feels_like:    Math.round(d.main.feels_like),
+      humidity:      d.main.humidity,
+      rainfall:      d.rain?.['1h'] ?? d.rain?.['3h'] ?? 0,
+      wind_speed:    Math.round(d.wind.speed * 3.6),
+      description:   d.weather[0].description,
+      icon:          d.weather[0].icon,
+      forecast_date: new Date().toISOString().split('T')[0],
+    });
+  } catch (err: any) {
+    res.status(502).json({ error: 'Weather lookup failed', detail: err.message });
+  }
+});
+
+router.get('/location', authenticate, async (req: AuthRequest, res: Response) => {
+  const { lat, lon } = req.query as { lat?: string; lon?: string };
+  if (!lat || !lon) return res.status(400).json({ error: 'lat and lon required' });
+
+  const apiKey = process.env.OPENWEATHER_API_KEY;
+  if (!apiKey || apiKey === 'your_openweather_api_key_here') {
+    return res.json({
+      city: 'Your Location', region: 'Current Location',
+      temperature: 24, feels_like: 26, humidity: 70,
+      rainfall: 5, wind_speed: 15,
+      description: 'Partly cloudy', icon: '02d',
+      forecast_date: new Date().toISOString().split('T')[0],
+    });
+  }
+
+  try {
+    const url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`;
+    const owRes = await fetch(url);
+    if (!owRes.ok) throw new Error(`OpenWeather HTTP ${owRes.status}`);
+    const d = await owRes.json() as any;
+
+    const city    = d.name || 'Your Location';
+    const country = d.sys?.country || '';
+    res.json({
+      city,
+      country,
+      region: `${city}${country ? ', ' + country : ''}`,
+      temperature:   Math.round(d.main.temp),
+      feels_like:    Math.round(d.main.feels_like),
+      humidity:      d.main.humidity,
+      rainfall:      d.rain?.['1h'] ?? d.rain?.['3h'] ?? 0,
+      wind_speed:    Math.round(d.wind.speed * 3.6),
+      description:   d.weather[0].description,
+      icon:          d.weather[0].icon,
+      forecast_date: new Date().toISOString().split('T')[0],
+    });
+  } catch (err: any) {
+    res.status(502).json({ error: 'Could not fetch weather for your location', detail: err.message });
+  }
+});
+
 router.get('/alerts', authenticate, async (req: AuthRequest, res: Response) => {
   const db = await getDb();
   let alerts = query<any>(db, `SELECT * FROM alerts WHERE alert_type = 'weather' ORDER BY created_at DESC`);

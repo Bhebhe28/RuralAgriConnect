@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { formatDate, timeAgo } from '../utils';
+import { imgUrl } from '../utils/imgUrl';
 
 interface Post {
   post_id: string;
@@ -117,9 +118,11 @@ export default function Community() {
           <div className="flex gap-3 text-xs text-muted mb-4">
             <div className="flex items-center gap-1">
               {selected.author_avatar ? (
-                <img 
-                  src={`${selected.author_avatar}`}
+                <img
+                  src={imgUrl(selected.author_avatar)}
                   alt={selected.author_name}
+                  loading="lazy"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
                   className="w-4 h-4 rounded-full object-cover"
                 />
               ) : (
@@ -132,9 +135,11 @@ export default function Community() {
           <p className="text-sm leading-relaxed whitespace-pre-wrap mb-3">{selected.body}</p>
           {selected.image_url && (
             <div className="mb-5">
-              <img 
-                src={`${selected.image_url}`}
+              <img
+                src={imgUrl(selected.image_url)}
                 alt="Post image"
+                loading="lazy"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
                 className="max-w-full h-auto rounded-lg shadow-sm"
               />
             </div>
@@ -153,9 +158,11 @@ export default function Community() {
               <div key={r.reply_id} className="flex gap-3">
                 <div className="w-8 h-8 rounded-full bg-moss/20 flex items-center justify-center text-sm flex-shrink-0 font-bold text-forest overflow-hidden">
                   {r.author_avatar ? (
-                    <img 
-                      src={`${r.author_avatar}`}
+                    <img
+                      src={imgUrl(r.author_avatar)}
                       alt={r.author_name}
+                      loading="lazy"
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
                       className="w-full h-full object-cover"
                     />
                   ) : (
@@ -167,9 +174,11 @@ export default function Community() {
                   <p className="text-sm leading-relaxed mb-2">{r.body}</p>
                   {r.image_url && (
                     <div className="mb-2">
-                      <img 
-                        src={`${r.image_url}`}
+                      <img
+                        src={imgUrl(r.image_url)}
                         alt="Reply image"
+                        loading="lazy"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
                         className="max-w-full h-auto rounded-lg shadow-sm max-h-48 object-cover"
                       />
                     </div>
@@ -185,9 +194,11 @@ export default function Community() {
             <div className="flex gap-2 mb-2">
               <div className="w-8 h-8 rounded-full bg-forest flex items-center justify-center text-white text-sm flex-shrink-0 font-bold overflow-hidden">
                 {user?.avatar_url ? (
-                  <img 
-                    src={`${user.avatar_url}`}
+                  <img
+                    src={imgUrl(user.avatar_url)}
                     alt={user.name}
+                    loading="lazy"
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
                     className="w-full h-full object-cover"
                   />
                 ) : (
@@ -352,9 +363,11 @@ export default function Community() {
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-full bg-forest flex items-center justify-center text-white font-bold flex-shrink-0 overflow-hidden">
                   {p.author_avatar ? (
-                    <img 
-                      src={`${p.author_avatar}`}
+                    <img
+                      src={imgUrl(p.author_avatar)}
                       alt={p.author_name}
+                      loading="lazy"
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
                       className="w-full h-full object-cover"
                     />
                   ) : (
@@ -370,9 +383,11 @@ export default function Community() {
                   <p className="text-xs text-muted line-clamp-2 mb-2">{p.body}</p>
                   {p.image_url && (
                     <div className="mb-2">
-                      <img 
-                        src={`${p.image_url}`}
+                      <img
+                        src={imgUrl(p.image_url)}
                         alt="Post image"
+                        loading="lazy"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
                         className="w-20 h-16 object-cover rounded-lg shadow-sm"
                       />
                     </div>
