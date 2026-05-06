@@ -7,7 +7,7 @@ import ThemeToggle from '../components/ThemeToggle';
 // ── Sticky Nav ────────────────────────────────────────────────────────────────
 function Nav() {
   const navigate = useNavigate();
-  const { token, user } = useAuth();
+  const { user } = useAuth();
   const { isDark } = useTheme();
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -67,7 +67,7 @@ function Nav() {
           {/* ── Day / Night toggle ── */}
           <ThemeToggle />
 
-          {token ? (
+          {user ? (
             <>
               <span className={`text-sm ${scrolled ? (isDark ? 'text-night-muted' : 'text-muted') : 'text-white/70'}`}>
                 👋 {user?.name?.split(' ')[0]}
@@ -126,7 +126,7 @@ function Nav() {
             </button>
           ))}
           <div className={`flex gap-3 pt-2 border-t ${isDark ? 'border-night-border' : 'border-sand'}`}>
-            {token ? (
+            {user ? (
               <button onClick={() => navigate('/dashboard')} className="flex-1 py-2.5 bg-forest text-white rounded-xl font-semibold hover:bg-forest-mid border-0 cursor-pointer">
                 Go to Dashboard →
               </button>

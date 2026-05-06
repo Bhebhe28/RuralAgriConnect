@@ -1,57 +1,43 @@
 import React, { useState, useEffect } from 'react';
-import api from '../api/client';
+import { getSubsidyRequests, createSubsidyRequest, updateSubsidyStatus } from '../services/firestore';
 import { useAuth } from '../context/AuthContext';
 
 interface Request {
-  request_id: string;
+  id: string;
+  request_id?: string;
   resource_type: string;
   quantity: string;
   reason: string;
   status: 'pending' | 'approved' | 'rejected';
-  review_notes: string;
+  review_notes?: string;
   created_at: string;
   farmer_name?: string;
   farmer_phone?: string;
   farmer_region?: string;
-  farmer_crops?: string;
-  reviewed_by_name?: string;
 }
 
-const STATUS_STYLE: Record<string, string> = {
-  pending:  'badge-orange',
-  approved: 'badge-green',
-  rejected: 'badge-red',
-};
+const RESOURCE_TYPES = ['Seeds', 'Fertilizer', 'Pesticides', 'Equipment', 'Irrigation', 'Animal Feed', 'Veterinary Support', 'Training'];
 
-const STATUS_ICON: Record<string, string> = {
-  pending: '⏳', approved: '✅', rejected: '❌',
-};
+const STATUS_STYLE: Record<string, string> = { pending: 'badge-orange', approved: 'badge-green', rejected: 'badge-red' };
+const STATUS_ICON:  Record<string, string> = { pending: '⏳', approved: '✅', rejected: '❌' };
 
 export default function SubsidyRequest() {
   const { isAdmin } = useAuth();
-  const [requests, setRequests] = useState<Request[]>([]);
-  const [resourceTypes, setResourceTypes] = useState<string[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [showForm, setShowForm] = useState(false);
+  const [requests, setRequests]   = useState<Request[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [showForm, setShowForm]   = useState(false);
   const [filterStatus, setFilterStatus] = useState('all');
-  const [saved, setSaved]       = useState('');
+  const [saved, setSaved]         = useState('');
   const [reviewing, setReviewing] = useState<string | null>(null);
   const [reviewNote, setReviewNote] = useState('');
 
-  const [form, setForm] = useState({
-    resource_type: 'Seeds', quantity: '', reason: '',
-  });
+  const [form, setForm] = useState({ resource_type: 'Seeds', quantity: '', reason: '' });
 
   const load = async () => {
     setLoading(true);
     try {
-      const [reqs, types] = await Promise.all([
-        api.get(isAdmin ? '/subsidies' : '/subsidies/mine').then(r => r.data),
-        api.get('/subsidies/resource-types').then(r => r.data),
-      ]);
-      setRequests(reqs);
-      setResourceTypes(types);
-      if (types.length > 0) setForm(f => ({ ...f, resource_type: types[0] }));
+      const reqs = await getSubsidyRequests();
+      setRequests(reqs as Request[]);
     } catch {}
     setLoading(false);
   };
@@ -61,20 +47,20 @@ export default function SubsidyRequest() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await api.post('/subsidies', form);
+      await createSubsidyRequest(form);
       setSaved('✅ Request submitted! An officer will review it shortly.');
       setShowForm(false);
-      setForm({ resource_type: resourceTypes[0] || 'Seeds', quantity: '', reason: '' });
+      setForm({ resource_type: RESOURCE_TYPES[0], quantity: '', reason: '' });
       load();
       setTimeout(() => setSaved(''), 5000);
     } catch (err: any) {
-      setSaved('❌ ' + (err.response?.data?.error || 'Failed to submit'));
+      setSaved('❌ ' + (err.message || 'Failed to submit'));
     }
   };
 
   const handleReview = async (id: string, status: 'approved' | 'rejected') => {
     try {
-      await api.put(`/subsidies/${id}/review`, { status, review_notes: reviewNote });
+      await updateSubsidyStatus(id, status, reviewNote);
       setReviewing(null);
       setReviewNote('');
       load();
@@ -108,7 +94,6 @@ export default function SubsidyRequest() {
         }`}>{saved}</div>
       )}
 
-      {/* Request form */}
       {showForm && (
         <div className="card animate-scale-in mb-6">
           <h3 className="font-serif text-lg mb-1">📝 Submit Resource Request</h3>
@@ -117,7 +102,7 @@ export default function SubsidyRequest() {
             <div>
               <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1.5">Resource Type</label>
               <div className="flex flex-wrap gap-2">
-                {resourceTypes.map(rt => (
+                {RESOURCE_TYPES.map(rt => (
                   <button key={rt} type="button"
                     onClick={() => setForm(f => ({ ...f, resource_type: rt }))}
                     className={`px-3 py-2 rounded-xl text-sm font-medium border-2 transition-all cursor-pointer ${
@@ -144,7 +129,6 @@ export default function SubsidyRequest() {
         </div>
       )}
 
-      {/* Filter tabs */}
       <div className="flex gap-2 mb-5 flex-wrap">
         {['all', 'pending', 'approved', 'rejected'].map(s => (
           <button key={s} onClick={() => setFilterStatus(s)}
@@ -170,7 +154,7 @@ export default function SubsidyRequest() {
       ) : (
         <div className="space-y-4">
           {filtered.map(r => (
-            <div key={r.request_id} className="card mb-0">
+            <div key={r.id} className="card mb-0">
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -179,7 +163,7 @@ export default function SubsidyRequest() {
                   </div>
                   {isAdmin && (
                     <p className="text-sm font-medium text-forest mb-1">
-                      👤 {r.farmer_name} · {r.farmer_phone} · {r.farmer_region?.split('—')[1]?.trim()}
+                      👤 {r.farmer_name || '—'} · {r.farmer_phone || '—'} · {r.farmer_region?.split('—')[1]?.trim() || '—'}
                     </p>
                   )}
                   <p className="text-sm text-muted"><span className="font-medium text-dark">Quantity:</span> {r.quantity}</p>
@@ -192,28 +176,22 @@ export default function SubsidyRequest() {
                   <p className="text-xs text-muted mt-2">{new Date(r.created_at).toLocaleDateString()}</p>
                 </div>
 
-                {/* Admin review buttons */}
-                {isAdmin && r.status === 'pending' && reviewing !== r.request_id && (
+                {isAdmin && r.status === 'pending' && reviewing !== r.id && (
                   <div className="flex gap-2 flex-shrink-0">
-                    <button onClick={() => setReviewing(r.request_id)}
-                      className="btn-primary text-xs px-3 py-2">Review</button>
+                    <button onClick={() => setReviewing(r.id)} className="btn-primary text-xs px-3 py-2">Review</button>
                   </div>
                 )}
               </div>
 
-              {/* Inline review panel */}
-              {isAdmin && reviewing === r.request_id && (
+              {isAdmin && reviewing === r.id && (
                 <div className="mt-4 pt-4 border-t border-sand animate-fade-in">
                   <textarea className="input resize-none mb-3" rows={2}
                     placeholder="Add a note for the farmer (optional)…"
                     value={reviewNote} onChange={e => setReviewNote(e.target.value)} />
                   <div className="flex gap-2">
-                    <button onClick={() => handleReview(r.request_id, 'approved')}
-                      className="btn-moss flex-1 py-2.5">✅ Approve</button>
-                    <button onClick={() => handleReview(r.request_id, 'rejected')}
-                      className="btn-danger flex-1 py-2.5">❌ Reject</button>
-                    <button onClick={() => { setReviewing(null); setReviewNote(''); }}
-                      className="btn-outline px-4">Cancel</button>
+                    <button onClick={() => handleReview(r.id, 'approved')} className="btn-moss flex-1 py-2.5">✅ Approve</button>
+                    <button onClick={() => handleReview(r.id, 'rejected')} className="btn-danger flex-1 py-2.5">❌ Reject</button>
+                    <button onClick={() => { setReviewing(null); setReviewNote(''); }} className="btn-outline px-4">Cancel</button>
                   </div>
                 </div>
               )}

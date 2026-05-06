@@ -1,12 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getAdvisories, getWeatherAlerts } from '../api';
-import type { Advisory, WeatherAlert } from '../types';
+import { getAdvisories, getOutbreaks } from '../services/firestore';
 import StatCard from '../components/StatCard';
 import AlertBanner from '../components/AlertBanner';
 import { useLanguage } from '../context/LanguageContext';
-import { useOfflineSync } from '../hooks/useOfflineSync';
 import { useOffline } from '../hooks/useOffline';
 
 export default function Dashboard() {
@@ -14,20 +12,29 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { t } = useLanguage();
   const isOffline = useOffline();
-  const { advisories: cachedAdvisories, alerts: cachedAlerts, lastSync, isSyncing } = useOfflineSync();
 
-  const [advisories, setAdvisories] = useState<Advisory[]>([]);
-  const [alerts, setAlerts] = useState<WeatherAlert[]>([]);
+  const [advisories, setAdvisories] = useState<any[]>([]);
+  const [outbreaks,  setOutbreaks]  = useState<any[]>([]);
+  const [lastSync,   setLastSync]   = useState<string | null>(localStorage.getItem('offline_last_sync'));
 
   useEffect(() => {
-    if (!isOffline) {
-      getAdvisories().then(setAdvisories).catch(() => setAdvisories(cachedAdvisories));
-      getWeatherAlerts().then(setAlerts).catch(() => setAlerts(cachedAlerts));
-    } else {
-      setAdvisories(cachedAdvisories);
-      setAlerts(cachedAlerts);
+    if (isOffline) {
+      try { setAdvisories(JSON.parse(localStorage.getItem('offline_advisories') || '[]')); } catch { /* ignore */ }
+      return;
     }
-  }, [isOffline, cachedAdvisories, cachedAlerts]);
+    getAdvisories()
+      .then(data => {
+        setAdvisories(data);
+        localStorage.setItem('offline_advisories', JSON.stringify(data));
+        const now = new Date().toISOString();
+        localStorage.setItem('offline_last_sync', now);
+        setLastSync(now);
+      })
+      .catch(() => {
+        try { setAdvisories(JSON.parse(localStorage.getItem('offline_advisories') || '[]')); } catch { /* ignore */ }
+      });
+    getOutbreaks().then(setOutbreaks).catch(() => {});
+  }, [isOffline]);
 
   const crops = ['Maize', 'Vegetables', 'Legumes'];
   const progress = [74, 52, 88];
@@ -40,19 +47,16 @@ export default function Dashboard() {
       {isOffline && (
         <AlertBanner type="warning" message={`📴 You're offline — showing cached data${lastSync ? ` (last synced ${new Date(lastSync).toLocaleTimeString()})` : ''}`} />
       )}
-      {isSyncing && !isOffline && (
-        <AlertBanner type="info" message="🔄 Syncing latest advisories and alerts…" />
-      )}
 
-      {alerts.filter(a => a.severity === 'critical').slice(0, 2).map(a => (
-        <AlertBanner key={a.id} type="critical" message={`${a.type}: ${a.message}`} />
+      {outbreaks.filter(o => o.severity === 'critical').slice(0, 2).map((o: any) => (
+        <AlertBanner key={o.outbreak_id || o.id} type="critical" message={`🚨 Outbreak: ${o.pest_name || o.description?.slice(0, 60)} — ${(o.region || '').split('—')[1]?.trim() || o.region}`} />
       ))}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard label={t.dashTotalAdvisories} value={advisories.length} sub={t.dashAdvisoriesSub} color="green" />
-        <StatCard label={t.dashWeatherAlerts}   value={alerts.length}     sub={t.dashWeatherSub}    color="red" />
-        <StatCard label={t.dashCriticalAlerts}  value={alerts.filter(a => a.severity === 'critical').length} sub={t.dashCriticalSub} color="earth" />
-        <StatCard label={t.dashOfflineReady}    value="100%"              sub={t.dashOfflineSub}    color="blue" />
+        <StatCard label={t.dashTotalAdvisories} value={advisories.length}  sub={t.dashAdvisoriesSub} color="green" />
+        <StatCard label="Active Outbreaks"      value={outbreaks.length}   sub="Pest & disease reports" color="red" />
+        <StatCard label={t.dashCriticalAlerts}  value={outbreaks.filter((o: any) => o.severity === 'critical').length} sub={t.dashCriticalSub} color="earth" />
+        <StatCard label={t.dashOfflineReady}    value="100%"               sub={t.dashOfflineSub}    color="blue" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">

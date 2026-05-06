@@ -1,145 +1,156 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { updateMe } from '../api';
+import { updateMe } from '../services/firestore';
 import { useLanguage } from '../context/LanguageContext';
-import api from '../api/client';
-import { imgUrl } from '../utils/imgUrl';
+import { updateProfile } from 'firebase/auth';
+import { auth } from '../firebase';
+
+const REGIONS = ['eThekwini','uMgungundlovu','iLembe','Zululand','uThukela'];
+
+async function compressImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      const MAX = 200;
+      let w = img.width, h = img.height;
+      if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+      else       { w = Math.round(w * MAX / h); h = MAX; }
+      canvas.width  = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.75));
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
 
 export default function Profile() {
-  const { user, login } = useAuth();
+  const { user, firebaseUser, refreshUser } = useAuth();
   const { t } = useLanguage();
   const [name, setName]     = useState(user?.name || '');
   const [phone, setPhone]   = useState(user?.phone || '');
   const [region, setRegion] = useState(user?.region || '');
-  const [saved, setSaved]         = useState(false);
-  const [loading, setLoading]     = useState(false);
-  const [avatarUploading, setAvatarUploading] = useState(false);
-  const [avatarError, setAvatarError] = useState('');
+  const [avatar, setAvatar] = useState<string | null>(user?.avatar_url || null);
+  const [saved, setSaved]   = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [avatarLoading, setAvatarLoading] = useState(false);
+  const [error, setError]   = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAvatarLoading(true);
+    setError('');
+    try {
+      const compressed = await compressImage(file);
+      setAvatar(compressed);
+    } catch {
+      setError('Could not process image. Please try a different photo.');
+    } finally {
+      setAvatarLoading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError('');
     try {
-      await updateMe({ name, phone, region });
-      if (user) login({ ...user, name, phone, region }, localStorage.getItem('token')!);
+      await updateMe({ name, phone, region, avatar_url: avatar || undefined });
+      if (firebaseUser) await updateProfile(firebaseUser, { displayName: name });
+      await refreshUser();
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save profile.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setAvatarUploading(true);
-    setAvatarError('');
-    try {
-      const formData = new FormData();
-      formData.append('avatar', file);
-      // Do NOT set Content-Type manually — Axios must auto-set multipart/form-data with boundary
-      const response = await api.post('/users/me/avatar', formData);
-
-      if (user) {
-        const updatedUser = { ...user, avatar_url: response.data.avatar_url };
-        login(updatedUser, localStorage.getItem('token')!);
-      }
-
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-    } catch (err: any) {
-      setAvatarError(err.response?.data?.error || 'Photo upload failed. Please try again.');
-    } finally {
-      setAvatarUploading(false);
-    }
-  };
+  const initials = (name || user?.name || '?').charAt(0).toUpperCase();
 
   return (
-    <div className="p-7 animate-fade-in">
-      {/* Header */}
-      <div className="bg-gradient-to-br from-forest to-forest-mid rounded-2xl p-8 text-white flex items-center gap-6 mb-6">
-        <div className="relative">
-          <div className="w-20 h-20 rounded-full bg-moss flex items-center justify-center text-4xl border-4 border-white/30 overflow-hidden">
-            {user?.avatar_url ? (
-              <img
-                src={imgUrl(user.avatar_url)}
-                alt="Profile"
-                loading="eager"
-                onError={(e) => {
-                  e.currentTarget.style.display = 'none';
-                  e.currentTarget.parentElement!.innerHTML += '<span style="font-size:2.25rem">👤</span>';
-                }}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              '👤'
-            )}
+    <div className="p-7 animate-fade-in max-w-xl">
+      <h2 className="text-2xl font-serif mb-1">{t.profileEditTitle}</h2>
+      <p className="text-sm text-muted mb-6">Update your account information and profile photo.</p>
+
+      {/* Avatar upload */}
+      <div className="flex items-center gap-5 mb-6">
+        <div className="relative flex-shrink-0">
+          <div className="w-20 h-20 rounded-full bg-forest flex items-center justify-center text-3xl text-white font-bold overflow-hidden ring-4 ring-sand">
+            {avatar
+              ? <img src={avatar} alt="Profile" className="w-full h-full object-cover" />
+              : initials
+            }
           </div>
-          <label className="absolute -bottom-1 -right-1 w-8 h-8 bg-white rounded-full flex items-center justify-center cursor-pointer shadow-lg hover:bg-gray-50 transition-colors">
-            <input 
-              type="file" 
-              accept="image/*" 
-              onChange={handleAvatarUpload}
-              className="hidden"
-              disabled={avatarUploading}
-            />
-            {avatarUploading ? (
-              <div className="w-4 h-4 border-2 border-forest border-t-transparent rounded-full animate-spin"></div>
-            ) : (
-              <span className="text-forest text-sm">📷</span>
-            )}
-          </label>
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={avatarLoading}
+            className="absolute bottom-0 right-0 w-7 h-7 bg-forest border-2 border-white rounded-full flex items-center justify-center text-white text-xs hover:bg-moss transition-colors disabled:opacity-50"
+            title="Change photo"
+          >
+            {avatarLoading ? '⏳' : '📷'}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleAvatarChange}
+          />
         </div>
         <div>
-          <h2 className="text-2xl font-serif">{user?.name}</h2>
-          <p className="text-sm opacity-70 mt-0.5">{user?.email}</p>
-          <span className="mt-2 inline-block bg-earth text-white text-xs font-bold px-3 py-1 rounded-full uppercase">
-            {user?.role}
+          <p className="font-semibold text-dark">{user?.name}</p>
+          <p className="text-sm text-muted">{user?.email}</p>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold mt-1 inline-block ${user?.role === 'admin' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+            {user?.role === 'admin' ? '⚙️ Admin' : '🌾 Farmer'}
           </span>
+          <p className="text-xs text-muted mt-1">Tap 📷 to change photo</p>
         </div>
       </div>
 
-      {avatarError && (
-        <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl px-4 py-3 mb-4 text-sm max-w-lg">
-          ⚠ {avatarError}
+      {saved && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl px-4 py-3 mb-4 text-sm animate-fade-in">
+          ✅ Profile updated successfully!
+        </div>
+      )}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl px-4 py-3 mb-4 text-sm animate-fade-in">
+          {error}
         </div>
       )}
 
-      {/* Edit form */}
-      <div className="card max-w-lg">
-        <h3 className="font-serif text-lg mb-5">{t.profileEditTitle}</h3>
-        {saved && (
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-4 py-3 mb-4 text-sm">
-            {t.profileSaved}
-          </div>
-        )}
-        <form onSubmit={handleSave} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1.5">{t.profileFullName}</label>
-            <input className="input" value={name} onChange={e => setName(e.target.value)} required />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1.5">{t.profileEmail}</label>
-            <input className="input bg-sand cursor-not-allowed" value={user?.email} disabled />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1.5">{t.profilePhone}</label>
-            <input className="input" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+27 83 000 0000" />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1.5">{t.profileRegion}</label>
-            <select className="input" value={region} onChange={e => setRegion(e.target.value)}>
-              {['eThekwini','uMgungundlovu','iLembe','Zululand','uThukela'].map(r => (
-                <option key={r} value={`KwaZulu-Natal — ${r}`}>KwaZulu-Natal — {r}</option>
-              ))}
-            </select>
-          </div>
-          <button type="submit" disabled={loading} className="btn-primary w-full py-3">
-            {loading ? t.profileSavingBtn : t.profileSaveBtn}
-          </button>
-        </form>
-      </div>
+      <form onSubmit={handleSave} className="space-y-4">
+        <div>
+          <label className="block text-xs font-bold text-muted uppercase tracking-widest mb-1.5">{t.profileFullName}</label>
+          <input className="input" value={name} onChange={e => setName(e.target.value)} required />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-muted uppercase tracking-widest mb-1.5">{t.profilePhone}</label>
+          <input className="input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+27 83 000 0000" />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-muted uppercase tracking-widest mb-1.5">{t.profileRegion}</label>
+          <select className="input" value={region} onChange={e => setRegion(e.target.value)}>
+            <option value="">Select region</option>
+            {REGIONS.map(r => (
+              <option key={r} value={`KwaZulu-Natal — ${r}`}>{r}</option>
+            ))}
+          </select>
+        </div>
+        <button type="submit" disabled={loading || avatarLoading} className="btn-primary py-3 px-6 disabled:opacity-60">
+          {loading ? t.profileSavingBtn : t.profileSaveBtn}
+        </button>
+      </form>
     </div>
   );
 }

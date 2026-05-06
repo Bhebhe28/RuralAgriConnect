@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createAdvisory } from '../api';
+import { createAdvisory } from '../services/firestore';
 import { useLanguage } from '../context/LanguageContext';
 
 const CROPS    = ['Maize', 'Vegetables', 'Poultry', 'General', 'Pest', 'Legumes'];
@@ -28,7 +28,7 @@ export default function PublishAdvisory() {
       await createAdvisory(form);
       navigate('/advisories');
     } catch (err: any) {
-      setError(err.response?.data?.error || t.publishFailed);
+      setError(err.message || t.publishFailed);
     } finally {
       setLoading(false);
     }

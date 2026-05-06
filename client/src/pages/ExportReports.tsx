@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import api from '../api/client';
+import { getUsers, getAdvisories, getYieldReports, getSubsidyRequests, getOutbreaks, getFarmFields } from '../services/firestore';
 
 type ExportType = 'farmers' | 'yields' | 'subsidies' | 'outbreaks' | 'advisories' | 'fields';
 
@@ -8,35 +8,43 @@ interface ExportConfig {
   icon: string;
   label: string;
   desc: string;
-  endpoint: string;
 }
 
 const EXPORTS: ExportConfig[] = [
-  { type: 'farmers',    icon: '👥', label: 'Farmer Register',      desc: 'All registered farmers with region, crops, and contact details', endpoint: '/users' },
-  { type: 'advisories', icon: '📋', label: 'Advisory Report',      desc: 'All published crop advisories with severity and region', endpoint: '/advisories' },
-  { type: 'yields',     icon: '🌾', label: 'Yield Report',         desc: 'Harvest data by farmer, crop, region, and season', endpoint: '/yields' },
-  { type: 'subsidies',  icon: '📦', label: 'Resource Requests',    desc: 'All subsidy/resource requests with approval status', endpoint: '/subsidies' },
-  { type: 'outbreaks',  icon: '🦠', label: 'Outbreak Report',      desc: 'Pest and disease outbreaks by region and severity', endpoint: '/outbreaks' },
-  { type: 'fields',     icon: '🗺️', label: 'Field Registration',   desc: 'All registered farm fields with GPS and crop data', endpoint: '/fields' },
+  { type: 'farmers',    icon: '👥', label: 'Farmer Register',   desc: 'All registered farmers with region, crops, and contact details' },
+  { type: 'advisories', icon: '📋', label: 'Advisory Report',   desc: 'All published crop advisories with severity and region' },
+  { type: 'yields',     icon: '🌾', label: 'Yield Report',      desc: 'Harvest data by farmer, crop, region, and season' },
+  { type: 'subsidies',  icon: '📦', label: 'Resource Requests', desc: 'All subsidy/resource requests with approval status' },
+  { type: 'outbreaks',  icon: '🦠', label: 'Outbreak Report',   desc: 'Pest and disease outbreaks by region and severity' },
+  { type: 'fields',     icon: '🗺️', label: 'Field Registration',desc: 'All registered farm fields with GPS and crop data' },
 ];
 
-function toCSV(data: any[], type: ExportType): string {
+const fieldMaps: Record<ExportType, { key: string; label: string }[]> = {
+  farmers:    [{ key: 'name', label: 'Name' }, { key: 'email', label: 'Email' }, { key: 'phone', label: 'Phone' }, { key: 'role', label: 'Role' }, { key: 'region', label: 'Region' }, { key: 'created_at', label: 'Joined' }],
+  advisories: [{ key: 'title', label: 'Title' }, { key: 'crop', label: 'Crop' }, { key: 'region', label: 'Region' }, { key: 'severity', label: 'Severity' }, { key: 'author_name', label: 'Author' }, { key: 'published_at', label: 'Date' }],
+  yields:     [{ key: 'farmer_name', label: 'Farmer' }, { key: 'season', label: 'Season' }, { key: 'crop_type', label: 'Crop' }, { key: 'region', label: 'Region' }, { key: 'area_hectares', label: 'Hectares' }, { key: 'yield_kg', label: 'Yield (kg)' }, { key: 'quality', label: 'Quality' }, { key: 'reported_at', label: 'Date' }],
+  subsidies:  [{ key: 'farmer_name', label: 'Farmer' }, { key: 'farmer_region', label: 'Region' }, { key: 'resource_type', label: 'Resource' }, { key: 'quantity', label: 'Quantity' }, { key: 'reason', label: 'Reason' }, { key: 'status', label: 'Status' }, { key: 'review_notes', label: 'Notes' }, { key: 'created_at', label: 'Date' }],
+  outbreaks:  [{ key: 'region', label: 'Region' }, { key: 'pest_name', label: 'Pest/Disease' }, { key: 'crop_affected', label: 'Crop' }, { key: 'severity', label: 'Severity' }, { key: 'source', label: 'Source' }, { key: 'reported_date', label: 'Date' }],
+  fields:     [{ key: 'farmer_name', label: 'Farmer' }, { key: 'farmer_region', label: 'Region' }, { key: 'field_name', label: 'Field' }, { key: 'crop_type', label: 'Crop' }, { key: 'area_hectares', label: 'Hectares' }, { key: 'soil_type', label: 'Soil' }, { key: 'irrigation', label: 'Irrigation' }, { key: 'gps_lat', label: 'Lat' }, { key: 'gps_lng', label: 'Lng' }],
+};
+
+async function fetchData(type: ExportType): Promise<any[]> {
+  switch (type) {
+    case 'farmers':    return getUsers();
+    case 'advisories': return getAdvisories();
+    case 'yields':     return getYieldReports();
+    case 'subsidies':  return getSubsidyRequests();
+    case 'outbreaks':  return getOutbreaks();
+    case 'fields':     return getFarmFields();
+  }
+}
+
+function toCSV(data: any[], cols: { key: string; label: string }[]): string {
   if (!data.length) return 'No data available';
-
-  const fieldMaps: Record<ExportType, string[]> = {
-    farmers:    ['name', 'email', 'phone', 'role', 'region', 'created_at'],
-    advisories: ['title', 'crop_type', 'region', 'severity', 'author_name', 'created_at'],
-    yields:     ['farmer_name', 'season', 'crop_type', 'region', 'area_hectares', 'yield_kg', 'quality', 'reported_at'],
-    subsidies:  ['farmer_name', 'farmer_region', 'resource_type', 'quantity', 'reason', 'status', 'review_notes', 'created_at'],
-    outbreaks:  ['region', 'crop_type', 'description', 'severity', 'reported_by_name', 'reported_date'],
-    fields:     ['farmer_name', 'farmer_region', 'field_name', 'crop_type', 'area_hectares', 'soil_type', 'irrigation', 'gps_lat', 'gps_lng'],
-  };
-
-  const cols = fieldMaps[type];
-  const header = cols.join(',');
+  const header = cols.map(c => c.label).join(',');
   const rows = data.map(row =>
-    cols.map(col => {
-      const val = row[col] ?? '';
+    cols.map(c => {
+      const val = row[c.key] ?? '';
       const str = String(val).replace(/"/g, '""');
       return str.includes(',') || str.includes('\n') ? `"${str}"` : str;
     }).join(',')
@@ -45,24 +53,12 @@ function toCSV(data: any[], type: ExportType): string {
 }
 
 function toPrintHTML(data: any[], config: ExportConfig): string {
-  if (!data.length) return '<p>No data available</p>';
-
-  const fieldMaps: Record<ExportType, { key: string; label: string }[]> = {
-    farmers:    [{ key: 'name', label: 'Name' }, { key: 'email', label: 'Email' }, { key: 'phone', label: 'Phone' }, { key: 'role', label: 'Role' }, { key: 'region', label: 'Region' }, { key: 'created_at', label: 'Joined' }],
-    advisories: [{ key: 'title', label: 'Title' }, { key: 'crop_type', label: 'Crop' }, { key: 'region', label: 'Region' }, { key: 'severity', label: 'Severity' }, { key: 'author_name', label: 'Author' }, { key: 'created_at', label: 'Date' }],
-    yields:     [{ key: 'farmer_name', label: 'Farmer' }, { key: 'season', label: 'Season' }, { key: 'crop_type', label: 'Crop' }, { key: 'region', label: 'Region' }, { key: 'area_hectares', label: 'Hectares' }, { key: 'yield_kg', label: 'Yield (kg)' }, { key: 'quality', label: 'Quality' }],
-    subsidies:  [{ key: 'farmer_name', label: 'Farmer' }, { key: 'farmer_region', label: 'Region' }, { key: 'resource_type', label: 'Resource' }, { key: 'quantity', label: 'Quantity' }, { key: 'status', label: 'Status' }, { key: 'review_notes', label: 'Notes' }],
-    outbreaks:  [{ key: 'region', label: 'Region' }, { key: 'crop_type', label: 'Crop' }, { key: 'description', label: 'Description' }, { key: 'severity', label: 'Severity' }, { key: 'reported_date', label: 'Date' }],
-    fields:     [{ key: 'farmer_name', label: 'Farmer' }, { key: 'field_name', label: 'Field' }, { key: 'crop_type', label: 'Crop' }, { key: 'area_hectares', label: 'Hectares' }, { key: 'soil_type', label: 'Soil' }, { key: 'irrigation', label: 'Irrigation' }],
-  };
-
   const cols = fieldMaps[config.type];
+  if (!data.length) return '<p>No data available</p>';
   const now = new Date().toLocaleDateString('en-ZA', { year: 'numeric', month: 'long', day: 'numeric' });
-
-  return `
-    <!DOCTYPE html><html><head>
+  return `<!DOCTYPE html><html><head>
     <meta charset="UTF-8">
-    <title>RurAgriConnect — ${config.label}</title>
+    <title>RuralAgriConnect — ${config.label}</title>
     <style>
       body { font-family: Arial, sans-serif; font-size: 11px; color: #0D1F17; margin: 20px; }
       .header { border-bottom: 3px solid #1B4332; padding-bottom: 12px; margin-bottom: 16px; }
@@ -78,7 +74,7 @@ function toPrintHTML(data: any[], config: ExportConfig): string {
     </style>
     </head><body>
     <div class="header">
-      <h1>🌿 RurAgriConnect — ${config.label}</h1>
+      <h1>🌿 RuralAgriConnect — ${config.label}</h1>
       <p>KwaZulu-Natal Municipal Agricultural Advisory System</p>
     </div>
     <div class="meta">
@@ -91,11 +87,8 @@ function toPrintHTML(data: any[], config: ExportConfig): string {
         ${data.map(row => `<tr>${cols.map(c => `<td>${row[c.key] ?? '—'}</td>`).join('')}</tr>`).join('')}
       </tbody>
     </table>
-    <div class="footer">
-      RurAgriConnect · KwaZulu-Natal Offline Farm Advisory System · Confidential Municipal Report
-    </div>
-    </body></html>
-  `;
+    <div class="footer">RuralAgriConnect · KwaZulu-Natal Offline Farm Advisory System · Confidential Municipal Report</div>
+    </body></html>`;
 }
 
 export default function ExportReports() {
@@ -106,11 +99,11 @@ export default function ExportReports() {
     setLoading(config.type);
     setMessage('');
     try {
-      const data = await api.get(config.endpoint).then(r => r.data);
-      const arr = Array.isArray(data) ? data : data.advisories || data.reports || [];
+      const arr = await fetchData(config.type);
+      const cols = fieldMaps[config.type];
 
       if (format === 'csv') {
-        const csv = toCSV(arr, config.type);
+        const csv = toCSV(arr, cols);
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -130,7 +123,7 @@ export default function ExportReports() {
         setMessage(`✅ ${config.label} opened for printing (${arr.length} records)`);
       }
     } catch (err: any) {
-      setMessage(`❌ Export failed: ${err.response?.data?.error || err.message}`);
+      setMessage(`❌ Export failed: ${err.message}`);
     } finally {
       setLoading(null);
       setTimeout(() => setMessage(''), 5000);

@@ -8,27 +8,36 @@ You specialize in crop management, pest and disease identification, soil health,
 When analyzing images: identify crop diseases, pest damage, or nutrient deficiencies. Give a clear diagnosis with confidence level and specific treatment recommendations using locally available South African products.
 Keep responses practical, concise, and actionable. Use simple language suitable for rural farmers.`;
 
-const MODELS = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
+const MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-flash'];
 
-function getModel(modelName: string) {
+function getModel(modelName: string, sysPrompt: string = SYSTEM_PROMPT) {
   const genAI = new GoogleGenerativeAI(API_KEY);
-  return genAI.getGenerativeModel({ model: modelName, systemInstruction: SYSTEM_PROMPT });
+  return genAI.getGenerativeModel({ model: modelName, systemInstruction: sysPrompt });
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-async function tryModels<T>(fn: (model: ReturnType<typeof getModel>) => Promise<T>): Promise<T> {
-  let lastErr: any;
+async function tryModels<T>(fn: (model: ReturnType<typeof getModel>) => Promise<T>, sysPrompt?: string): Promise<T> {
+  const errors: string[] = [];
   for (const name of MODELS) {
     try {
-      return await fn(getModel(name));
+      return await fn(getModel(name, sysPrompt));
     } catch (err: any) {
-      lastErr = err;
-      console.warn(`${name} failed:`, err.message?.slice(0, 80));
+      const msg = `${name}: ${err.message?.slice(0, 300)}`;
+      errors.push(msg);
+      console.warn(msg);
       await sleep(1000);
     }
   }
-  throw lastErr;
+  throw new Error(errors.join(' | '));
+}
+
+function buildSystemPrompt(language: string): string {
+  let prompt = SYSTEM_PROMPT;
+  if (language === 'zu') prompt += '\n\nCRITICAL: Respond ONLY in isiZulu. Do not use any English unless the farmer uses English.';
+  if (language === 'af') prompt += '\n\nCRITICAL: Respond ONLY in Afrikaans. Moenie Engels gebruik nie tensy die boer Engels gebruik.';
+  if (language === 'st') prompt += '\n\nCRITICAL: Respond ONLY in Sesotho. Se sebelise Senyesemane haeba molemisi a sebelisa Senyesemane.';
+  return prompt;
 }
 
 // ── TEXT CHAT ────────────────────────────────────────────────
@@ -39,18 +48,24 @@ export async function sendChatMessage(
 ): Promise<string> {
   if (!API_KEY) return getFallback(message);
 
-  let systemPrompt = SYSTEM_PROMPT;
-  if (language === 'zu') systemPrompt += '\n\nCRITICAL: Respond ONLY in isiZulu.';
-  if (language === 'af') systemPrompt += '\n\nCRITICAL: Respond ONLY in Afrikaans.';
-  if (language === 'st') systemPrompt += '\n\nCRITICAL: Respond ONLY in Sesotho.';
+  const systemPrompt = buildSystemPrompt(language);
 
   try {
     return await tryModels(async (model) => {
       const chat = model.startChat({ history });
       const result = await chat.sendMessage(message);
       return result.response.text();
-    });
-  } catch {
+    }, systemPrompt);
+  } catch (err: any) {
+    console.error('AI chat failed:', err?.message);
+    // Return fallback but surface quota/network errors clearly
+    const msg = (err?.message || '').toLowerCase();
+    if (msg.includes('429') || msg.includes('quota')) {
+      return '⚠️ AI is busy right now (daily quota reached). Please try again tomorrow, or describe your issue and I\'ll give you advice from my knowledge base.\n\n' + getFallback(message);
+    }
+    if (msg.includes('fetch') || msg.includes('network') || msg.includes('failed')) {
+      return '📡 Network error — check your internet connection and try again.';
+    }
     return getFallback(message);
   }
 }
@@ -61,27 +76,43 @@ export async function scanImage(
   prompt?: string,
   language = 'en'
 ): Promise<{ reply: string; hasDisease: boolean; diseaseName: string; severity: string }> {
-  const supportedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-  if (!supportedTypes.includes(file.type)) {
+  // Accept all common types + HEIC/HEIF from iPhone. Empty type also treated as JPEG.
+  const heicTypes = ['image/heic', 'image/heif'];
+  const supported  = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  const isHeic     = heicTypes.includes(file.type.toLowerCase());
+  const isEmpty    = !file.type;
+  const isSupported = supported.includes(file.type.toLowerCase());
+
+  if (!isHeic && !isEmpty && !isSupported) {
     return {
       reply: '📸 Please upload a JPEG, PNG, or WebP image. iPhone HEIC photos can be converted by taking a screenshot first.',
       hasDisease: false, diseaseName: '', severity: 'info',
     };
   }
 
+  // Use jpeg as fallback mimeType for HEIC or unknown types — Gemini handles the raw bytes
+  const mimeType = isSupported ? file.type : 'image/jpeg';
+
   const base64 = await fileToBase64(file);
-  const imageData = { inlineData: { mimeType: file.type, data: base64 } };
+  const imageData = { inlineData: { mimeType, data: base64 } };
   const scanPrompt = prompt || 'Analyze this farm image. Identify any crop diseases, pest damage, or nutrient deficiencies. Provide: 1) Disease/issue name, 2) Confidence level, 3) Symptoms visible, 4) Treatment steps using locally available South African products, 5) Prevention tips for a KZN farmer.';
+
+  const scanSystemPrompt = buildSystemPrompt(language);
 
   try {
     const reply = await tryModels(async (model) => {
       const result = await model.generateContent([scanPrompt, imageData]);
       return result.response.text();
-    });
+    }, scanSystemPrompt);
 
     const meta = parseScan(reply);
-    // Save scan to Firestore (non-blocking)
-    saveCropScan({ diagnosis: reply, ...meta }).catch(console.error);
+    saveCropScan({
+      diagnosis:    reply,
+      crop_type:    meta.crop_type,
+      disease_name: meta.diseaseName,
+      has_disease:  meta.hasDisease,
+      severity:     meta.severity,
+    }).catch(console.error);
     return { reply, ...meta };
   } catch {
     return {
@@ -103,9 +134,11 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-const CRITICAL_TERMS = ['armyworm', 'locust', 'bacterial wilt', 'late blight', 'stem borer', 'mosaic virus'];
-const WARNING_TERMS  = ['blight', 'rust', 'rot', 'mildew', 'fungal', 'aphid', 'whitefly', 'thrips'];
-const HEALTHY_TERMS  = ['healthy', 'no disease', 'no sign of disease', 'no pest', 'normal growth'];
+const CRITICAL_TERMS    = ['armyworm', 'locust', 'bacterial wilt', 'late blight', 'stem borer', 'mosaic virus'];
+const WARNING_TERMS     = ['blight', 'rust', 'rot', 'mildew', 'fungal', 'aphid', 'whitefly', 'thrips'];
+const HEALTHY_TERMS     = ['healthy', 'no disease', 'no sign of disease', 'no pest', 'normal growth'];
+const NON_DISEASE_TERMS = ['not a disease', 'not a pest', 'not caused by', 'nutrient deficiency',
+                           'calcium deficiency', 'deficiency', 'not an infectious', 'abiotic'];
 const CROP_MAP: [string, string][] = [
   ['maize','Maize'],['corn','Maize'],['tomato','Vegetables'],['potato','Root Crops'],
   ['bean','Legumes'],['soybean','Legumes'],['cabbage','Vegetables'],['spinach','Vegetables'],
@@ -113,10 +146,13 @@ const CROP_MAP: [string, string][] = [
 
 function parseScan(text: string) {
   const lower = text.toLowerCase();
-  const isHealthy  = HEALTHY_TERMS.some(k => lower.includes(k));
-  const isCritical = CRITICAL_TERMS.some(k => lower.includes(k));
-  const isWarning  = WARNING_TERMS.some(k => lower.includes(k));
-  const hasDisease = !isHealthy && (isCritical || isWarning || lower.includes('disease') || lower.includes('infection'));
+  const isHealthy     = HEALTHY_TERMS.some(k => lower.includes(k));
+  const isNonPathogen = NON_DISEASE_TERMS.some(k => lower.includes(k));
+  const isCritical    = CRITICAL_TERMS.some(k => lower.includes(k));
+  const isWarning     = WARNING_TERMS.some(k => lower.includes(k));
+  const hasDisease    = !isHealthy && !isNonPathogen &&
+                        (isCritical || isWarning || lower.includes('infection') ||
+                         (lower.includes('disease') && !lower.includes('no disease')));
   const cropMatch  = CROP_MAP.find(([k]) => lower.includes(k));
   const nameMatch  = text.match(/(?:disease\/issue name|identified as|diagnosis)[:\s*]+([^\n.]+)/i) || text.match(/\*\*([^*]{5,50})\*\*/);
   return {

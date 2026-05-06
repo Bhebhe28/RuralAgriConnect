@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { getUsers, deleteUser } from '../api';
-import type { User } from '../types';
+import { getUsers, deleteUser } from '../services/firestore';
 import { useLanguage } from '../context/LanguageContext';
 
 export default function ManageFarmers() {
-  const [users, setUsers]   = useState<User[]>([]);
+  const [users, setUsers]   = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const { t } = useLanguage();
@@ -13,14 +12,14 @@ export default function ManageFarmers() {
   useEffect(() => { load(); }, []);
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`${t.farmersRemoveConfirm} ${name}?`)) return;
+    if (!confirm(`${t.farmersRemoveConfirm} ${name || 'this user'}?`)) return;
     await deleteUser(id);
     setUsers(prev => prev.filter(u => u.id !== id));
   };
 
   const filtered = users.filter(u =>
-    u.name.toLowerCase().includes(search.toLowerCase()) ||
-    u.email.toLowerCase().includes(search.toLowerCase())
+    (u.name || '').toLowerCase().includes(search.toLowerCase()) ||
+    (u.email || '').toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -51,8 +50,8 @@ export default function ManageFarmers() {
             <tbody>
               {filtered.map(u => (
                 <tr key={u.id} className="border-b border-sand hover:bg-cream transition-colors">
-                  <td className="py-3 px-3 font-medium">{u.name}</td>
-                  <td className="py-3 px-3 text-muted">{u.email}</td>
+                  <td className="py-3 px-3 font-medium">{u.name || '—'}</td>
+                  <td className="py-3 px-3 text-muted">{u.email || '—'}</td>
                   <td className="py-3 px-3 text-muted">{u.phone || '—'}</td>
                   <td className="py-3 px-3">
                     <span className={`badge ${u.role === 'admin' ? 'badge-blue' : 'badge-green'}`}>{u.role}</span>

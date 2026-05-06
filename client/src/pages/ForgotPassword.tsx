@@ -19,8 +19,8 @@ export default function ForgotPassword() {
       setSent(true);
     } catch (err: any) {
       const code = err.code || '';
-      if (code === 'auth/user-not-found') {
-        setSent(true); // Don't reveal whether email exists
+      if (code === 'auth/user-not-found' || code === 'auth/invalid-email') {
+        setError(`No account found for ${email}. Please check the email address or register a new account.`);
       } else {
         setError('Something went wrong. Please try again.');
       }

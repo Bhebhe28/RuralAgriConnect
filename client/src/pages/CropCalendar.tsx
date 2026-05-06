@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import api from '../api/client';
+import { getCropCalendar } from '../services/firestore';
 
 interface CalendarEntry {
-  calendar_id: string;
+  id: string;
+  calendar_id?: string;
   crop_type: string;
   region: string;
   activity: string;
@@ -30,6 +31,30 @@ const ACTIVITY_COLORS: Record<string, string> = {
   'Vaccination':      'bg-purple-100 text-purple-800 border-purple-200',
 };
 
+const DEFAULT_CALENDAR: CalendarEntry[] = [
+  { id: 'c1',  crop_type: 'Maize',      region: 'KwaZulu-Natal', activity: 'Land Preparation', month_start: 8,  month_end: 10, description: 'Clear fields, plough and disc. Apply agricultural lime if soil pH < 5.5, ideally 2–3 weeks before planting.' },
+  { id: 'c2',  crop_type: 'Maize',      region: 'KwaZulu-Natal', activity: 'Planting',          month_start: 10, month_end: 12, description: 'Plant at 75cm row spacing, 25cm between plants. Use certified seed. Apply 2:3:2 (22) basal fertilizer at planting.' },
+  { id: 'c3',  crop_type: 'Maize',      region: 'KwaZulu-Natal', activity: 'Weed Control',      month_start: 11, month_end: 1,  description: 'Apply pre-emergent herbicide after planting. Hand weed or cultivate when maize is knee-high.' },
+  { id: 'c4',  crop_type: 'Maize',      region: 'KwaZulu-Natal', activity: 'Top Dressing',      month_start: 12, month_end: 2,  description: 'Apply LAN (28% N) at 150–200 kg/ha when maize reaches the V6 stage (knee high). Avoid applying during drought.' },
+  { id: 'c5',  crop_type: 'Maize',      region: 'KwaZulu-Natal', activity: 'Pest Scouting',     month_start: 11, month_end: 4,  description: 'Scout weekly for Fall Armyworm, stalk borer, and aphids. Apply Coragen or Ampligo when threshold is exceeded.' },
+  { id: 'c6',  crop_type: 'Maize',      region: 'KwaZulu-Natal', activity: 'Harvesting',        month_start: 4,  month_end: 6,  description: 'Harvest when grain moisture is 12–14%. Dry cobs on elevated racks. Store in cool, dry, rodent-proof conditions.' },
+  { id: 'c7',  crop_type: 'Vegetables', region: 'KwaZulu-Natal', activity: 'Seedbed Prep',      month_start: 1,  month_end: 3,  description: 'Prepare a fine seedbed with good drainage. Incorporate compost at 5 tons/ha. Add 2:3:2 NPK basal fertilizer.' },
+  { id: 'c8',  crop_type: 'Vegetables', region: 'KwaZulu-Natal', activity: 'Transplanting',     month_start: 2,  month_end: 4,  description: 'Transplant seedlings in the evening or on cloudy days to reduce transplant shock. Water immediately after transplanting.' },
+  { id: 'c9',  crop_type: 'Vegetables', region: 'KwaZulu-Natal', activity: 'Weed Control',      month_start: 2,  month_end: 5,  description: 'Hand weed regularly. Apply mulch to suppress weeds and retain soil moisture. Avoid deep cultivation near roots.' },
+  { id: 'c10', crop_type: 'Vegetables', region: 'KwaZulu-Natal', activity: 'Fertilizing',       month_start: 2,  month_end: 5,  description: 'Apply balanced NPK foliar spray every 2 weeks. Supplement with compost tea for organic production.' },
+  { id: 'c11', crop_type: 'Vegetables', region: 'KwaZulu-Natal', activity: 'Irrigation',        month_start: 10, month_end: 4,  description: 'Water consistently. Drip irrigation is ideal. Avoid overhead watering in late afternoon to reduce fungal disease risk.' },
+  { id: 'c12', crop_type: 'Vegetables', region: 'KwaZulu-Natal', activity: 'Harvesting',        month_start: 4,  month_end: 7,  description: 'Harvest in the cool morning hours. Grade and pack carefully to minimise bruising and post-harvest losses.' },
+  { id: 'c13', crop_type: 'Legumes',    region: 'KwaZulu-Natal', activity: 'Land Preparation',  month_start: 9,  month_end: 10, description: 'Plough and disc field. Legumes fix nitrogen — avoid high-N fertilizers. Target soil pH of 6.0–6.5.' },
+  { id: 'c14', crop_type: 'Legumes',    region: 'KwaZulu-Natal', activity: 'Planting',          month_start: 10, month_end: 11, description: 'Inoculate soybean seeds with Rhizobium inoculant. Plant at 75cm rows. Apply phosphorus and potassium fertilizer.' },
+  { id: 'c15', crop_type: 'Legumes',    region: 'KwaZulu-Natal', activity: 'Pest Scouting',     month_start: 11, month_end: 2,  description: 'Monitor for pod borers, aphids, and rust disease. Apply copper oxychloride at the first signs of rust.' },
+  { id: 'c16', crop_type: 'Legumes',    region: 'KwaZulu-Natal', activity: 'Harvesting',        month_start: 3,  month_end: 5,  description: 'Harvest when pods are brown and dry. Thresh carefully to avoid seed damage. Dry to below 12% moisture before storage.' },
+  { id: 'c17', crop_type: 'Root Crops', region: 'KwaZulu-Natal', activity: 'Land Preparation',  month_start: 7,  month_end: 9,  description: 'Deep plough to 30cm for potatoes and sweet potatoes. Ensure excellent drainage. Incorporate compost at planting depth.' },
+  { id: 'c18', crop_type: 'Root Crops', region: 'KwaZulu-Natal', activity: 'Planting',          month_start: 8,  month_end: 10, description: 'Plant certified, disease-free seed potatoes. Cut pieces with at least 2 eyes. Apply Ridomil or similar at planting.' },
+  { id: 'c19', crop_type: 'Root Crops', region: 'KwaZulu-Natal', activity: 'Irrigation',        month_start: 8,  month_end: 12, description: 'Consistent soil moisture is critical for tuber development. Reduce irrigation 2 weeks before harvest to prevent rot.' },
+  { id: 'c20', crop_type: 'Root Crops', region: 'KwaZulu-Natal', activity: 'Pest Scouting',     month_start: 9,  month_end: 12, description: 'Scout for late blight, black scurf, and tuber moth. Apply preventative fungicide sprays during wet weather.' },
+  { id: 'c21', crop_type: 'Root Crops', region: 'KwaZulu-Natal', activity: 'Harvesting',        month_start: 11, month_end: 3,  description: 'Harvest in dry weather. Allow tubers to cure for 2 weeks at 15°C before storage. Store in cool, dark, well-ventilated conditions.' },
+];
+
 function activityColor(activity: string) {
   return ACTIVITY_COLORS[activity] || 'bg-sand text-dark border-sand';
 }
@@ -38,34 +63,33 @@ function isActiveInMonth(entry: CalendarEntry, month: number): boolean {
   const s = entry.month_start;
   const e = entry.month_end;
   if (s <= e) return month >= s && month <= e;
-  // Wraps year (e.g. Oct–Feb)
   return month >= s || month <= e;
 }
 
 export default function CropCalendar() {
-  const [entries, setEntries]   = useState<CalendarEntry[]>([]);
+  const [entries, setEntries]   = useState<CalendarEntry[]>(DEFAULT_CALENDAR);
   const [loading, setLoading]   = useState(true);
   const [cropFilter, setCropFilter] = useState('All');
   const [selected, setSelected] = useState<CalendarEntry | null>(null);
-  const currentMonth = new Date().getMonth() + 1; // 1-indexed
+  const currentMonth = new Date().getMonth() + 1;
 
   useEffect(() => {
-    api.get('/calendar').then(r => {
-      setEntries(r.data);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    getCropCalendar()
+      .then(data => {
+        if (data.length > 0) setEntries(data as CalendarEntry[]);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   }, []);
 
   const filtered = cropFilter === 'All' ? entries : entries.filter(e => e.crop_type === cropFilter);
 
-  // Group by crop
   const byCrop = filtered.reduce<Record<string, CalendarEntry[]>>((acc, e) => {
     if (!acc[e.crop_type]) acc[e.crop_type] = [];
     acc[e.crop_type].push(e);
     return acc;
   }, {});
 
-  // Current month activities
   const currentActivities = entries.filter(e => isActiveInMonth(e, currentMonth));
 
   return (
@@ -75,7 +99,6 @@ export default function CropCalendar() {
         <p className="text-sm text-muted mt-0.5">KwaZulu-Natal seasonal farming schedule — know exactly what to do each month</p>
       </div>
 
-      {/* Current month highlight */}
       {currentActivities.length > 0 && (
         <div className="bg-gradient-to-r from-forest to-forest-mid rounded-2xl p-5 text-white mb-6">
           <div className="flex items-center gap-2 mb-3">
@@ -87,7 +110,7 @@ export default function CropCalendar() {
           </div>
           <div className="flex flex-wrap gap-2">
             {currentActivities.map(a => (
-              <button key={a.calendar_id}
+              <button key={a.id}
                 onClick={() => setSelected(a)}
                 className="bg-white/15 border border-white/20 text-white text-xs px-3 py-1.5 rounded-full hover:bg-white/25 transition-colors cursor-pointer">
                 🌾 {a.crop_type} — {a.activity}
@@ -97,7 +120,6 @@ export default function CropCalendar() {
         </div>
       )}
 
-      {/* Crop filter */}
       <div className="flex gap-2 mb-6 flex-wrap">
         {CROPS.map(c => (
           <button key={c} onClick={() => setCropFilter(c)}
@@ -116,8 +138,6 @@ export default function CropCalendar() {
           {Object.entries(byCrop).map(([crop, cropEntries]) => (
             <div key={crop} className="card">
               <h3 className="font-serif text-lg mb-4">🌾 {crop}</h3>
-
-              {/* Month grid */}
               <div className="overflow-x-auto">
                 <table className="w-full text-xs min-w-[600px]">
                   <thead>
@@ -132,7 +152,7 @@ export default function CropCalendar() {
                   </thead>
                   <tbody>
                     {cropEntries.map(entry => (
-                      <tr key={entry.calendar_id} className="border-t border-sand/50">
+                      <tr key={entry.id} className="border-t border-sand/50">
                         <td className="py-2 pr-4">
                           <button onClick={() => setSelected(entry)}
                             className={`text-xs px-2 py-1 rounded-lg border font-medium text-left w-full hover:opacity-80 transition-opacity cursor-pointer ${activityColor(entry.activity)}`}>
@@ -147,9 +167,7 @@ export default function CropCalendar() {
                               {active ? (
                                 <div className={`w-6 h-6 rounded-full mx-auto flex items-center justify-center text-white text-xs font-bold ${
                                   month === currentMonth ? 'bg-forest scale-110' : 'bg-moss/70'
-                                }`}>
-                                  ✓
-                                </div>
+                                }`}>✓</div>
                               ) : (
                                 <div className="w-6 h-6 rounded-full mx-auto bg-sand/50" />
                               )}
@@ -166,7 +184,6 @@ export default function CropCalendar() {
         </div>
       )}
 
-      {/* Activity detail modal */}
       {selected && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-end md:items-center justify-center p-4"
           onClick={() => setSelected(null)}>
@@ -181,9 +198,7 @@ export default function CropCalendar() {
             <div className="space-y-3 text-sm">
               <div className="flex items-center gap-2">
                 <span className="text-muted w-20">Period:</span>
-                <span className="font-semibold">
-                  {MONTHS[selected.month_start - 1]} — {MONTHS[selected.month_end - 1]}
-                </span>
+                <span className="font-semibold">{MONTHS[selected.month_start - 1]} — {MONTHS[selected.month_end - 1]}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-muted w-20">Region:</span>

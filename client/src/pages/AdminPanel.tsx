@@ -1,17 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { getAdvisories, getWeatherAlerts, getUsers, deleteAdvisory, deleteWeatherAlert } from '../api';
-import type { Advisory, WeatherAlert, User } from '../types';
+import { getAdvisories, getOutbreaks, getUsers, deleteAdvisory, deleteOutbreak } from '../services/firestore';
 import { useLanguage } from '../context/LanguageContext';
 
 export default function AdminPanel() {
-  const [advisories, setAdvisories] = useState<Advisory[]>([]);
-  const [alerts, setAlerts]         = useState<WeatherAlert[]>([]);
-  const [users, setUsers]           = useState<User[]>([]);
+  const [advisories, setAdvisories] = useState<any[]>([]);
+  const [outbreaks, setOutbreaks]   = useState<any[]>([]);
+  const [users, setUsers]           = useState<any[]>([]);
   const { t } = useLanguage();
 
   useEffect(() => {
     getAdvisories().then(setAdvisories).catch(() => {});
-    getWeatherAlerts().then(setAlerts).catch(() => {});
+    getOutbreaks().then(setOutbreaks).catch(() => {});
     getUsers().then(setUsers).catch(() => {});
   }, []);
 
@@ -20,16 +19,16 @@ export default function AdminPanel() {
     setAdvisories(prev => prev.filter(a => a.id !== id));
   };
 
-  const removeAlert = async (id: string) => {
-    await deleteWeatherAlert(id);
-    setAlerts(prev => prev.filter(a => a.id !== id));
+  const removeOutbreak = async (id: string) => {
+    await deleteOutbreak(id);
+    setOutbreaks(prev => prev.filter(o => o.id !== id));
   };
 
   const stats = [
-    { label: t.adminTotalUsers,    value: users.length,                                color: 'text-forest' },
-    { label: t.adminFarmers,       value: users.filter(u => u.role === 'farmer').length, color: 'text-moss' },
-    { label: t.adminAdvisories,    value: advisories.length,                            color: 'text-earth' },
-    { label: t.adminWeatherAlerts, value: alerts.length,                                color: 'text-red-500' },
+    { label: t.adminTotalUsers,    value: users.length,                                  color: 'text-forest' },
+    { label: t.adminFarmers,       value: users.filter((u: any) => u.role === 'farmer').length, color: 'text-moss' },
+    { label: t.adminAdvisories,    value: advisories.length,                              color: 'text-earth' },
+    { label: 'Active Outbreaks',   value: outbreaks.length,                              color: 'text-red-500' },
   ];
 
   return (
@@ -64,18 +63,18 @@ export default function AdminPanel() {
         </div>
 
         <div className="card">
-          <h3 className="font-serif text-lg mb-4">{t.adminWeatherSection}</h3>
+          <h3 className="font-serif text-lg mb-4">🦠 Active Outbreaks</h3>
           <div className="space-y-2 max-h-72 overflow-y-auto">
-            {alerts.map(a => (
-              <div key={a.id} className="flex items-center justify-between py-2 border-b border-sand last:border-0">
+            {outbreaks.map((o: any) => (
+              <div key={o.id} className="flex items-center justify-between py-2 border-b border-sand last:border-0">
                 <div className="flex-1 min-w-0 mr-3">
-                  <p className="text-sm font-medium truncate">{a.type}</p>
-                  <p className="text-xs text-muted">{a.region} · {a.severity}</p>
+                  <p className="text-sm font-medium truncate">{o.pest_name || o.description?.slice(0, 40)}</p>
+                  <p className="text-xs text-muted">{(o.region || '').split('—')[1]?.trim() || o.region} · {o.severity}</p>
                 </div>
-                <button onClick={() => removeAlert(a.id)} className="btn-danger text-xs px-2.5 py-1 flex-shrink-0">{t.delete}</button>
+                <button onClick={() => removeOutbreak(o.id)} className="btn-danger text-xs px-2.5 py-1 flex-shrink-0">{t.delete}</button>
               </div>
             ))}
-            {alerts.length === 0 && <p className="text-sm text-muted text-center py-4">{t.adminNoAlerts}</p>}
+            {outbreaks.length === 0 && <p className="text-sm text-muted text-center py-4">No active outbreaks.</p>}
           </div>
         </div>
       </div>

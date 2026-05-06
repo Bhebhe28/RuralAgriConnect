@@ -37,6 +37,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   register: (data: RegisterData) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
   isAdmin: boolean;
 }
 
@@ -102,6 +103,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signOut(auth);
   };
 
+  const refreshUser = async () => {
+    const fbUser = auth.currentUser;
+    if (!fbUser) return;
+    const snap = await getDoc(doc(db, 'users', fbUser.uid));
+    if (snap.exists()) setUser({ id: fbUser.uid, ...snap.data() } as AppUser);
+  };
+
   return (
     <AuthContext.Provider value={{
       user,
@@ -110,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       register,
       logout,
+      refreshUser,
       isAdmin: user?.role === 'admin',
     }}>
       {children}
@@ -121,7 +130,7 @@ export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) return {
     user: null, firebaseUser: null, loading: false,
-    login: async () => {}, register: async () => {}, logout: async () => {},
+    login: async () => {}, register: async () => {}, logout: async () => {}, refreshUser: async () => {},
     isAdmin: false,
   };
   return ctx;

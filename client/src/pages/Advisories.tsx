@@ -1,39 +1,43 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getAdvisories, getAdvisory } from '../api';
-import type { Advisory } from '../types';
+import { getAdvisories, getAdvisory } from '../services/firestore';
 import AdvisoryCard from '../components/AdvisoryCard';
 import { useLanguage } from '../context/LanguageContext';
 import { useOffline } from '../hooks/useOffline';
-import { useOfflineSync } from '../hooks/useOfflineSync';
 import { formatDate } from '../utils';
 
 const CROPS    = ['All', 'Maize', 'Vegetables', 'Poultry', 'General', 'Pest'];
 const SEVERITY = ['All', 'info', 'warning', 'critical'];
 
 export function AdvisoriesList() {
-  const [advisories, setAdvisories] = useState<Advisory[]>([]);
+  const [advisories, setAdvisories] = useState<any[]>([]);
   const [search, setSearch]         = useState('');
   const [crop, setCrop]             = useState('All');
   const [severity, setSeverity]     = useState('All');
   const [loading, setLoading]       = useState(true);
   const { t } = useLanguage();
   const isOffline = useOffline();
-  const { advisories: cachedAdvisories } = useOfflineSync();
 
   useEffect(() => {
-    if (!isOffline) {
-      getAdvisories()
-        .then(data => { setAdvisories(data); setLoading(false); })
-        .catch(() => { setAdvisories(cachedAdvisories); setLoading(false); });
-    } else {
-      setAdvisories(cachedAdvisories);
+    if (isOffline) {
+      try { setAdvisories(JSON.parse(localStorage.getItem('offline_advisories') || '[]')); } catch { /* ignore */ }
       setLoading(false);
+      return;
     }
-  }, [isOffline, cachedAdvisories]);
+    getAdvisories()
+      .then(data => {
+        setAdvisories(data);
+        localStorage.setItem('offline_advisories', JSON.stringify(data));
+        setLoading(false);
+      })
+      .catch(() => {
+        try { setAdvisories(JSON.parse(localStorage.getItem('offline_advisories') || '[]')); } catch { /* ignore */ }
+        setLoading(false);
+      });
+  }, [isOffline]);
 
   const filtered = advisories.filter(a => {
-    const matchSearch   = a.title.toLowerCase().includes(search.toLowerCase()) || a.content.toLowerCase().includes(search.toLowerCase());
+    const matchSearch   = (a.title || '').toLowerCase().includes(search.toLowerCase()) || (a.content || '').toLowerCase().includes(search.toLowerCase());
     const matchCrop     = crop === 'All' || a.crop === crop;
     const matchSeverity = severity === 'All' || a.severity === severity;
     return matchSearch && matchCrop && matchSeverity;
@@ -85,7 +89,7 @@ export function AdvisoriesList() {
 export function AdvisoryDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [advisory, setAdvisory] = useState<Advisory | null>(null);
+  const [advisory, setAdvisory] = useState<any | null>(null);
   const { t } = useLanguage();
 
   useEffect(() => {
@@ -118,7 +122,7 @@ export function AdvisoryDetail() {
           <h3 className="font-serif text-lg mb-1">🛡️ Prevention Tips</h3>
           <p className="text-xs text-muted mb-4">Follow these steps to protect your crops and reduce disease risk</p>
           <ul className="space-y-3">
-            {advisory.prevention_tips.map((tip, i) => (
+            {advisory.prevention_tips.map((tip: string, i: number) => (
               <li key={i} className="flex gap-3 text-sm">
                 <span className="flex-shrink-0 w-6 h-6 rounded-full bg-moss/10 text-moss flex items-center justify-center font-bold text-xs">
                   {i + 1}

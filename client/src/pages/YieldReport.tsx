@@ -1,28 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import api from '../api/client';
+import { getYieldReports, createYieldReport } from '../services/firestore';
 import { useAuth } from '../context/AuthContext';
 
 interface YieldReport {
-  report_id: string;
+  id: string;
+  report_id?: string;
   season: string;
   crop_type: string;
   region: string;
   area_hectares: number;
   yield_kg: number;
   quality: string;
-  notes: string;
+  notes?: string;
   reported_at: string;
   farmer_name?: string;
-}
-
-interface Summary {
-  crop_type: string;
-  region: string;
-  season: string;
-  farm_count: number;
-  total_hectares: number;
-  total_yield_kg: number;
-  avg_yield_per_ha: number;
+  farmer_region?: string;
 }
 
 const CROPS   = ['Maize', 'Vegetables', 'Legumes', 'Poultry', 'Root Crops', 'Other'];
@@ -30,14 +22,15 @@ const SEASONS = ['2026/27', '2025/26', '2024/25', '2023/24'];
 const QUALITY = ['excellent', 'good', 'fair', 'poor'];
 const REGIONS = ['eThekwini', 'uMgungundlovu', 'iLembe', 'Zululand', 'uThukela'];
 
+const qualityColor = (q: string) => ({ excellent: 'badge-green', good: 'badge-blue', fair: 'badge-orange', poor: 'badge-red' }[q] || 'badge-blue');
+
 export default function YieldReport() {
   const { isAdmin } = useAuth();
   const [reports, setReports]   = useState<YieldReport[]>([]);
-  const [summary, setSummary]   = useState<Summary[]>([]);
   const [loading, setLoading]   = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saved, setSaved]       = useState('');
-  const [tab, setTab]           = useState<'mine' | 'all' | 'summary'>('mine');
+  const [tab, setTab]           = useState<'reports' | 'summary'>('reports');
 
   const [form, setForm] = useState({
     season: '2025/26', crop_type: 'Maize',
@@ -48,17 +41,8 @@ export default function YieldReport() {
   const load = async () => {
     setLoading(true);
     try {
-      if (isAdmin) {
-        const [all, sum] = await Promise.all([
-          api.get('/yields').then(r => r.data),
-          api.get('/yields/summary').then(r => r.data),
-        ]);
-        setReports(all);
-        setSummary(sum);
-      } else {
-        const mine = await api.get('/yields/mine').then(r => r.data);
-        setReports(mine);
-      }
+      const data = await getYieldReports();
+      setReports(data as YieldReport[]);
     } catch {}
     setLoading(false);
   };
@@ -68,7 +52,7 @@ export default function YieldReport() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await api.post('/yields', {
+      await createYieldReport({
         ...form,
         area_hectares: parseFloat(form.area_hectares),
         yield_kg: parseFloat(form.yield_kg),
@@ -79,13 +63,21 @@ export default function YieldReport() {
       load();
       setTimeout(() => setSaved(''), 4000);
     } catch (err: any) {
-      setSaved('❌ ' + (err.response?.data?.error || 'Failed to submit'));
+      setSaved('❌ ' + (err.message || 'Failed to submit'));
     }
   };
 
-  const qualityColor = (q: string) => ({
-    excellent: 'badge-green', good: 'badge-blue', fair: 'badge-orange', poor: 'badge-red'
-  }[q] || 'badge-blue');
+  // Compute summary client-side
+  const summary = Object.values(
+    reports.reduce<Record<string, any>>((acc, r) => {
+      const key = `${r.crop_type}|${r.region}|${r.season}`;
+      if (!acc[key]) acc[key] = { crop_type: r.crop_type, region: r.region, season: r.season, farm_count: 0, total_hectares: 0, total_yield_kg: 0 };
+      acc[key].farm_count += 1;
+      acc[key].total_hectares += r.area_hectares || 0;
+      acc[key].total_yield_kg += r.yield_kg || 0;
+      return acc;
+    }, {})
+  ).map((s: any) => ({ ...s, avg_yield_per_ha: s.total_hectares > 0 ? Math.round(s.total_yield_kg / s.total_hectares) : 0 }));
 
   return (
     <div className="p-4 md:p-7 animate-fade-in">
@@ -109,7 +101,6 @@ export default function YieldReport() {
         }`}>{saved}</div>
       )}
 
-      {/* Submit form */}
       {showForm && (
         <div className="card animate-scale-in mb-6">
           <h3 className="font-serif text-lg mb-4">📝 Log Your Harvest</h3>
@@ -170,13 +161,12 @@ export default function YieldReport() {
         </div>
       )}
 
-      {/* Admin tabs */}
       {isAdmin && (
         <div className="flex bg-sand rounded-2xl p-1 mb-5 w-fit">
-          {(['all', 'summary'] as const).map(t => (
+          {(['reports', 'summary'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-5 py-2 rounded-xl text-sm font-semibold transition-all ${tab === t ? 'bg-white text-forest shadow-sm' : 'text-muted'}`}>
-              {t === 'all' ? '📋 All Reports' : '📊 Summary'}
+              {t === 'reports' ? '📋 All Reports' : '📊 Summary'}
             </button>
           ))}
         </div>
@@ -185,19 +175,17 @@ export default function YieldReport() {
       {loading ? (
         <div className="card text-center py-12 text-muted">Loading reports…</div>
       ) : tab === 'summary' && isAdmin ? (
-        /* Summary view */
         <div className="space-y-4">
           {summary.length === 0 ? (
             <div className="card text-center py-12 text-muted">No yield data yet.</div>
           ) : (
             <>
-              {/* Totals banner */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-2 stagger">
                 {[
-                  { label: 'Total Farms Reporting', value: summary.reduce((a, s) => a + s.farm_count, 0), icon: '🏡' },
-                  { label: 'Total Hectares', value: summary.reduce((a, s) => a + s.total_hectares, 0).toFixed(1) + ' ha', icon: '📐' },
-                  { label: 'Total Yield', value: (summary.reduce((a, s) => a + s.total_yield_kg, 0) / 1000).toFixed(1) + ' tons', icon: '🌾' },
-                  { label: 'Crop Types', value: [...new Set(summary.map(s => s.crop_type))].length, icon: '🌱' },
+                  { label: 'Total Farms Reporting', value: summary.reduce((a: number, s: any) => a + s.farm_count, 0), icon: '🏡' },
+                  { label: 'Total Hectares', value: summary.reduce((a: number, s: any) => a + s.total_hectares, 0).toFixed(1) + ' ha', icon: '📐' },
+                  { label: 'Total Yield', value: (summary.reduce((a: number, s: any) => a + s.total_yield_kg, 0) / 1000).toFixed(1) + ' tons', icon: '🌾' },
+                  { label: 'Crop Types', value: [...new Set(summary.map((s: any) => s.crop_type))].length, icon: '🌱' },
                 ].map(stat => (
                   <div key={stat.label} className="card mb-0 text-center animate-fade-in">
                     <div className="text-3xl mb-1">{stat.icon}</div>
@@ -217,13 +205,13 @@ export default function YieldReport() {
                     </tr>
                   </thead>
                   <tbody>
-                    {summary.map((s, i) => (
+                    {summary.map((s: any, i: number) => (
                       <tr key={i} className="border-b border-sand hover:bg-cream transition-colors">
                         <td className="py-3 px-3 font-medium">{s.crop_type}</td>
-                        <td className="py-3 px-3 text-muted text-xs">{s.region.split('—')[1]?.trim() || s.region}</td>
+                        <td className="py-3 px-3 text-muted text-xs">{s.region?.split('—')[1]?.trim() || s.region}</td>
                         <td className="py-3 px-3 text-muted">{s.season}</td>
                         <td className="py-3 px-3 text-center font-semibold text-forest">{s.farm_count}</td>
-                        <td className="py-3 px-3">{s.total_hectares} ha</td>
+                        <td className="py-3 px-3">{s.total_hectares.toFixed(1)} ha</td>
                         <td className="py-3 px-3 font-semibold">{(s.total_yield_kg / 1000).toFixed(1)} tons</td>
                         <td className="py-3 px-3 text-moss font-semibold">{s.avg_yield_per_ha} kg/ha</td>
                       </tr>
@@ -235,7 +223,6 @@ export default function YieldReport() {
           )}
         </div>
       ) : (
-        /* Reports list */
         <div className="card overflow-x-auto">
           {reports.length === 0 ? (
             <div className="text-center py-12">
@@ -255,13 +242,13 @@ export default function YieldReport() {
               </thead>
               <tbody>
                 {reports.map(r => (
-                  <tr key={r.report_id} className="border-b border-sand hover:bg-cream transition-colors">
-                    {isAdmin && <td className="py-3 px-3 font-medium">{r.farmer_name}</td>}
+                  <tr key={r.id} className="border-b border-sand hover:bg-cream transition-colors">
+                    {isAdmin && <td className="py-3 px-3 font-medium">{r.farmer_name || '—'}</td>}
                     <td className="py-3 px-3 font-medium">{r.crop_type}</td>
                     <td className="py-3 px-3 text-muted">{r.season}</td>
-                    <td className="py-3 px-3 text-muted text-xs">{r.region.split('—')[1]?.trim() || r.region}</td>
+                    <td className="py-3 px-3 text-muted text-xs">{r.region?.split('—')[1]?.trim() || r.region}</td>
                     <td className="py-3 px-3">{r.area_hectares} ha</td>
-                    <td className="py-3 px-3 font-semibold text-forest">{r.yield_kg.toLocaleString()} kg</td>
+                    <td className="py-3 px-3 font-semibold text-forest">{Number(r.yield_kg).toLocaleString()} kg</td>
                     <td className="py-3 px-3"><span className={`badge ${qualityColor(r.quality)}`}>{r.quality}</span></td>
                     <td className="py-3 px-3 text-muted text-xs">{new Date(r.reported_at).toLocaleDateString()}</td>
                   </tr>

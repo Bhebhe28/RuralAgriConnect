@@ -107,8 +107,11 @@ export default function Layout() {
         {/* User info */}
         <div className="px-5 py-4 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-moss/30 border border-moss/40 flex items-center justify-center text-base flex-shrink-0">
-              {user?.name?.charAt(0).toUpperCase()}
+            <div className="w-9 h-9 rounded-full bg-moss/30 border border-moss/40 flex items-center justify-center text-base flex-shrink-0 overflow-hidden">
+              {user?.avatar_url
+                ? <img src={user.avatar_url} alt={user.name} className="w-full h-full object-cover" />
+                : (user?.name?.charAt(0).toUpperCase() || '?')
+              }
             </div>
             <div className="min-w-0">
               <p className="font-semibold text-sm text-white truncate">{user?.name}</p>

@@ -116,17 +116,25 @@ export async function getWeatherAlerts(region?: string) {
 }
 
 // ── NOTIFICATIONS ────────────────────────────────────────────
+// Note: no orderBy in queries — composite indexes not set up. Sort in memory instead.
 export async function getNotifications() {
   const userId = uid();
   if (!userId) return [];
-  const q = query(
-    collection(db, 'notifications'),
-    where('user_id', '==', userId),
-    orderBy('created_at', 'desc'),
-    limit(50)
-  );
-  const snap_ = await getDocs(q);
-  return snap_.docs.map(d => {
+
+  const [userSnap, broadcastSnap] = await Promise.all([
+    getDocs(query(
+      collection(db, 'notifications'),
+      where('user_id', '==', userId),
+      limit(60)
+    )),
+    getDocs(query(
+      collection(db, 'notifications'),
+      where('user_id', '==', 'broadcast'),
+      limit(30)
+    )),
+  ]);
+
+  const all = [...userSnap.docs, ...broadcastSnap.docs].map(d => {
     const n = d.data();
     return {
       id:         d.id,
@@ -136,6 +144,13 @@ export async function getNotifications() {
       created_at: n.created_at || '',
     };
   });
+
+  // Deduplicate by id, sort newest first
+  const seen = new Set<string>();
+  return all
+    .filter(n => { if (seen.has(n.id)) return false; seen.add(n.id); return true; })
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 50);
 }
 
 export async function markRead(id: string) {
@@ -145,10 +160,12 @@ export async function markRead(id: string) {
 export async function markAllRead() {
   const userId = uid();
   if (!userId) return;
-  const q = query(collection(db, 'notifications'), where('user_id', '==', userId), where('read', '==', 0));
-  const snap_ = await getDocs(q);
+  // Single where clause only — no composite index needed
+  const snap_ = await getDocs(query(collection(db, 'notifications'), where('user_id', '==', userId)));
+  const unread = snap_.docs.filter(d => !d.data().read);
+  if (!unread.length) return;
   const batch = writeBatch(db);
-  snap_.docs.forEach(d => batch.update(d.ref, { read: 1 }));
+  unread.forEach(d => batch.update(d.ref, { read: 1 }));
   await batch.commit();
 }
 
@@ -162,7 +179,7 @@ export async function getMe() {
   return { id: userId, name: u.name, email: u.email, phone: u.phone, role: u.role, region: u.region, avatar_url: u.avatar_url };
 }
 
-export async function updateMe(data: { name?: string; phone?: string; region?: string }) {
+export async function updateMe(data: { name?: string; phone?: string; region?: string; avatar_url?: string }) {
   const userId = uid();
   if (!userId) throw new Error('Not authenticated');
   await updateDoc(doc(db, 'users', userId), { ...data, updated_at: new Date().toISOString() });
@@ -211,7 +228,7 @@ export async function getCommunityPost(id: string) {
   );
   const replies = repliesSnap.docs.map(d => {
     const r = d.data();
-    return { reply_id: d.id, body: r.body, image_url: r.image_url || null, created_at: r.created_at, author_name: r.author_name, author_avatar: r.author_avatar || null };
+    return { reply_id: d.id, body: r.body || '', image_url: r.image_url || null, audio_url: r.audio_url || null, created_at: r.created_at || '', author_name: r.author_name || 'Farmer', author_avatar: r.author_avatar || null, user_id: r.user_id || '' };
   });
 
   return {
@@ -224,7 +241,12 @@ export async function getCommunityPost(id: string) {
 export async function createCommunityPost(data: { title: string; body: string; category: string }) {
   const user = auth.currentUser;
   const id = uuid();
-  await setDoc(doc(db, 'community_posts', id), {
+  const notifId = uuid();
+  const now = new Date().toISOString();
+  const author = user?.displayName || 'A farmer';
+
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'community_posts', id), {
     title:        data.title,
     body:         data.body,
     category:     data.category || 'general',
@@ -232,31 +254,61 @@ export async function createCommunityPost(data: { title: string; body: string; c
     likes:        0,
     reply_count:  0,
     user_id:      user?.uid || '',
-    author_name:  user?.displayName || 'Farmer',
+    author_name:  author,
     author_avatar: null,
-    created_at:   new Date().toISOString(),
-    updated_at:   new Date().toISOString(),
+    created_at:   now,
+    updated_at:   now,
   });
+  batch.set(doc(db, 'notifications', notifId), {
+    user_id:    'broadcast',
+    type:       'community',
+    title:      `💬 New Post: ${data.title}`,
+    message:    `${author} posted in ${data.category}: "${data.body.slice(0, 100)}"`,
+    post_id:    id,
+    read:       0,
+    created_at: now,
+  });
+  await batch.commit();
   return { post_id: id };
 }
 
-export async function addReply(postId: string, body: string) {
+export async function addReply(postId: string, body: string, mediaUrl?: string | null, mediaType?: 'image' | 'audio' | null) {
   const user = auth.currentUser;
   const replyId = uuid();
-  await setDoc(doc(db, 'community_posts', postId, 'replies', replyId), {
-    body,
-    image_url:    null,
-    user_id:      user?.uid || '',
-    author_name:  user?.displayName || 'Farmer',
-    author_avatar: null,
-    created_at:   new Date().toISOString(),
-  });
-  // Increment reply count
+  const notifId = uuid();
+  const now = new Date().toISOString();
+  const author = user?.displayName || 'A farmer';
+
   const postRef = doc(db, 'community_posts', postId);
   const postSnap = await getDoc(postRef);
+  const postTitle = postSnap.exists() ? postSnap.data().title : 'a post';
+  const postAuthorId = postSnap.exists() ? postSnap.data().user_id : null;
+
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'community_posts', postId, 'replies', replyId), {
+    body,
+    image_url:    mediaType === 'image' ? (mediaUrl || null) : null,
+    audio_url:    mediaType === 'audio' ? (mediaUrl || null) : null,
+    user_id:      user?.uid || '',
+    author_name:  author,
+    author_avatar: null,
+    created_at:   now,
+  });
   if (postSnap.exists()) {
-    await updateDoc(postRef, { reply_count: (postSnap.data().reply_count || 0) + 1 });
+    batch.update(postRef, { reply_count: (postSnap.data().reply_count || 0) + 1 });
   }
+  // Notify the post author if it's someone else's post
+  const targetUserId = postAuthorId && postAuthorId !== user?.uid ? postAuthorId : 'broadcast';
+  batch.set(doc(db, 'notifications', notifId), {
+    user_id:    targetUserId,
+    type:       'community',
+    title:      `💬 New Reply on "${postTitle}"`,
+    message:    `${author} replied: "${body.slice(0, 100)}"`,
+    post_id:    postId,
+    read:       0,
+    created_at: now,
+  });
+  await batch.commit();
 }
 
 export async function likePost(postId: string) {
@@ -271,24 +323,33 @@ export async function likePost(postId: string) {
 export async function getYieldReports() {
   const userId = uid();
   if (!userId) return [];
-  const q = query(collection(db, 'yield_reports'), where('farmer_id', '==', userId), orderBy('reported_at', 'desc'));
+  const userSnap = await getDoc(doc(db, 'users', userId));
+  const isAdmin = userSnap.data()?.role === 'admin';
+  const q = isAdmin
+    ? query(collection(db, 'yield_reports'), orderBy('reported_at', 'desc'))
+    : query(collection(db, 'yield_reports'), where('farmer_id', '==', userId), orderBy('reported_at', 'desc'));
   const snap_ = await getDocs(q);
   return snap_.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
 export async function createYieldReport(data: any) {
   const id = uuid();
+  const userId = uid();
+  const userSnap = await getDoc(doc(db, 'users', userId));
+  const userData = userSnap.data() || {};
   await setDoc(doc(db, 'yield_reports', id), {
-    report_id:    id,
-    farmer_id:    uid(),
-    season:       data.season,
-    crop_type:    data.crop_type,
-    region:       data.region,
+    report_id:     id,
+    farmer_id:     userId,
+    farmer_name:   userData.name || '',
+    farmer_region: userData.region || '',
+    season:        data.season,
+    crop_type:     data.crop_type,
+    region:        data.region,
     area_hectares: data.area_hectares,
-    yield_kg:     data.yield_kg,
-    quality:      data.quality || 'good',
-    notes:        data.notes || '',
-    reported_at:  new Date().toISOString(),
+    yield_kg:      data.yield_kg,
+    quality:       data.quality || 'good',
+    notes:         data.notes || '',
+    reported_at:   new Date().toISOString(),
   });
   return { id };
 }
@@ -311,15 +372,21 @@ export async function getSubsidyRequests() {
 
 export async function createSubsidyRequest(data: any) {
   const id = uuid();
+  const userId = uid();
+  const userSnap = await getDoc(doc(db, 'users', userId));
+  const userData = userSnap.data() || {};
   await setDoc(doc(db, 'subsidy_requests', id), {
-    request_id:    id,
-    farmer_id:     uid(),
-    resource_type: data.resource_type,
-    quantity:      data.quantity,
-    reason:        data.reason,
-    status:        'pending',
-    created_at:    new Date().toISOString(),
-    updated_at:    new Date().toISOString(),
+    request_id:     id,
+    farmer_id:      userId,
+    farmer_name:    userData.name || '',
+    farmer_phone:   userData.phone || '',
+    farmer_region:  userData.region || '',
+    resource_type:  data.resource_type,
+    quantity:       data.quantity,
+    reason:         data.reason,
+    status:         'pending',
+    created_at:     new Date().toISOString(),
+    updated_at:     new Date().toISOString(),
   });
   return { id };
 }
@@ -351,16 +418,28 @@ export async function deleteCalendarEntry(id: string) {
 export async function getFarmFields() {
   const userId = uid();
   if (!userId) return [];
-  const q = query(collection(db, 'farm_fields'), where('farmer_id', '==', userId), orderBy('created_at', 'desc'));
+  const userSnap = await getDoc(doc(db, 'users', userId));
+  const isAdmin = userSnap.data()?.role === 'admin';
+  const q = isAdmin
+    ? query(collection(db, 'farm_fields'), orderBy('created_at', 'desc'))
+    : query(collection(db, 'farm_fields'), where('farmer_id', '==', userId), orderBy('created_at', 'desc'));
   const snap_ = await getDocs(q);
   return snap_.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
 export async function createFarmField(data: any) {
   const id = uuid();
+  const userId = uid();
+  const userSnap = await getDoc(doc(db, 'users', userId));
+  const userData = userSnap.data() || {};
   await setDoc(doc(db, 'farm_fields', id), {
-    field_id: id, farmer_id: uid(), ...data,
-    created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    field_id:      id,
+    farmer_id:     userId,
+    farmer_name:   userData.name || '',
+    farmer_region: userData.region || '',
+    ...data,
+    created_at:    new Date().toISOString(),
+    updated_at:    new Date().toISOString(),
   });
   return { id };
 }
@@ -380,10 +459,34 @@ export async function getOutbreaks() {
 }
 
 export async function createOutbreak(data: any) {
+  const userId = uid();
+  const userSnap = await getDoc(doc(db, 'users', userId));
+  const userData = userSnap.data() || {};
+  const farmerName = userData.name || 'A farmer';
   const id = uuid();
-  await setDoc(doc(db, 'pest_outbreaks', id), {
-    outbreak_id: id, ...data, reported_by: uid(), reported_date: new Date().toISOString(), source: 'admin',
+  const notifId = uuid();
+  const now = new Date().toISOString();
+  const severityEmoji = data.severity === 'critical' ? '🚨' : '⚠️';
+  const source = data.source || (userData.role === 'admin' ? 'admin' : 'farmer');
+  const reporterName = source === 'feed' ? 'Live Feed (AI)' : farmerName;
+
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'pest_outbreaks', id), {
+    outbreak_id: id, ...data, reported_by: userId, reported_by_name: reporterName,
+    reported_date: now, source,
   });
+  batch.set(doc(db, 'notifications', notifId), {
+    user_id: 'broadcast', type: 'outbreak',
+    title: `${severityEmoji} Outbreak Report: ${data.pest_name || data.description?.slice(0, 40) || 'Pest Alert'}`,
+    message: `${farmerName} reported a ${data.severity} outbreak in ${(data.region || '').split('—')[1]?.trim() || data.region}. Crop: ${data.crop_affected || data.crop_type}. ${data.description?.slice(0, 100) || ''}`,
+    read: 0, created_at: now,
+  });
+  await batch.commit();
+  return { id };
+}
+
+export async function deleteOutbreak(id: string) {
+  await deleteDoc(doc(db, 'pest_outbreaks', id));
 }
 
 // ── CROP SCANS ───────────────────────────────────────────────
@@ -392,19 +495,54 @@ export async function saveCropScan(data: { diagnosis: string; crop_type: string;
   if (!userId) return;
   const userSnap = await getDoc(doc(db, 'users', userId));
   const userData = userSnap.data() || {};
-  const id = uuid();
-  await setDoc(doc(db, 'crop_scans', id), {
-    scan_id:      id,
+  const region = userData.region || 'KwaZulu-Natal';
+  const farmerName = userData.name || 'A farmer';
+  const now = new Date().toISOString();
+  const scanId = uuid();
+
+  const batch = writeBatch(db);
+
+  batch.set(doc(db, 'crop_scans', scanId), {
+    scan_id:      scanId,
     user_id:      userId,
-    user_name:    userData.name || 'Farmer',
-    region:       userData.region || 'KwaZulu-Natal',
+    user_name:    farmerName,
+    region,
     diagnosis:    data.diagnosis.slice(0, 600),
     crop_type:    data.crop_type,
     disease_name: data.disease_name,
     has_disease:  data.has_disease ? 1 : 0,
     severity:     data.severity,
-    created_at:   new Date().toISOString(),
+    created_at:   now,
   });
+
+  if (data.has_disease && data.disease_name) {
+    const severityEmoji = data.severity === 'critical' ? '🚨' : '⚠️';
+    const outbreakId = uuid();
+    const notifId = uuid();
+
+    batch.set(doc(db, 'pest_outbreaks', outbreakId), {
+      outbreak_id:   outbreakId,
+      pest_name:     data.disease_name,
+      crop_affected: data.crop_type,
+      region,
+      severity:      data.severity,
+      reported_by:   userId,
+      reported_date: now,
+      source:        'ai_scan',
+      description:   `AI scan detected ${data.disease_name} in ${data.crop_type}. Reported by ${farmerName} in ${region}.`,
+    });
+
+    batch.set(doc(db, 'notifications', notifId), {
+      user_id:    'broadcast',
+      type:       'outbreak',
+      title:      `${severityEmoji} Outbreak Alert: ${data.disease_name}`,
+      message:    `${farmerName} in ${region} detected ${data.disease_name} in ${data.crop_type}. Check your crops for similar symptoms.`,
+      read:       0,
+      created_at: now,
+    });
+  }
+
+  await batch.commit();
 }
 
 export async function getCropScans() {
@@ -414,18 +552,81 @@ export async function getCropScans() {
 
 // ── ANALYTICS ────────────────────────────────────────────────
 export async function getAnalytics() {
-  const [usersSnap, advisoriesSnap, scansSnap, outbreaksSnap] = await Promise.all([
+  const [usersSnap, advisoriesSnap, scansSnap, outbreaksSnap, yieldsSnap, fieldsSnap, subsidiesSnap, postsSnap] = await Promise.all([
     getDocs(collection(db, 'users')),
     getDocs(collection(db, 'advisories')),
     getDocs(collection(db, 'crop_scans')),
     getDocs(collection(db, 'pest_outbreaks')),
+    getDocs(collection(db, 'yield_reports')),
+    getDocs(collection(db, 'farm_fields')),
+    getDocs(collection(db, 'subsidy_requests')),
+    getDocs(collection(db, 'community_posts')),
   ]);
+
+  const users      = usersSnap.docs.map(d => d.data());
+  const advisories = advisoriesSnap.docs.map(d => d.data());
+  const outbreaks  = outbreaksSnap.docs.map(d => d.data());
+  const yields     = yieldsSnap.docs.map(d => d.data());
+  const fields     = fieldsSnap.docs.map(d => d.data());
+  const subsidies  = subsidiesSnap.docs.map(d => d.data());
+
+  const farmersByRegion: Record<string, number> = {};
+  users.filter(u => u.role === 'farmer').forEach(u => {
+    const r = u.region?.split('—')[1]?.trim() || u.region || 'Unknown';
+    farmersByRegion[r] = (farmersByRegion[r] || 0) + 1;
+  });
+
+  const advisoriesByCrop: Record<string, number> = {};
+  advisories.forEach(a => {
+    const c = a.crop_type || a.crop || 'General';
+    advisoriesByCrop[c] = (advisoriesByCrop[c] || 0) + 1;
+  });
+
+  const advisoriesBySeverity: Record<string, number> = {};
+  advisories.forEach(a => {
+    const s = a.severity || 'info';
+    advisoriesBySeverity[s] = (advisoriesBySeverity[s] || 0) + 1;
+  });
+
+  const outbreaksByRegion: Record<string, number> = {};
+  outbreaks.forEach(o => {
+    const r = (o.region || '').split('—')[1]?.trim() || o.region || 'Unknown';
+    outbreaksByRegion[r] = (outbreaksByRegion[r] || 0) + 1;
+  });
+
+  const yieldByCrop: Record<string, { tons: number; reports: number }> = {};
+  yields.forEach(y => {
+    const c = y.crop_type || 'Other';
+    if (!yieldByCrop[c]) yieldByCrop[c] = { tons: 0, reports: 0 };
+    yieldByCrop[c].tons += (y.yield_kg || 0) / 1000;
+    yieldByCrop[c].reports += 1;
+  });
+
+  const subsidiesByType: Record<string, number> = {};
+  subsidies.forEach(s => {
+    const t = s.resource_type || 'Other';
+    subsidiesByType[t] = (subsidiesByType[t] || 0) + 1;
+  });
+
   return {
-    total_users:      usersSnap.size,
-    total_advisories: advisoriesSnap.size,
-    total_scans:      scansSnap.size,
-    total_outbreaks:  outbreaksSnap.size,
-    farmers:          usersSnap.docs.filter(d => d.data().role === 'farmer').length,
-    admins:           usersSnap.docs.filter(d => d.data().role === 'admin').length,
+    total_users:       usersSnap.size,
+    farmers:           users.filter(u => u.role === 'farmer').length,
+    admins:            users.filter(u => u.role === 'admin').length,
+    total_advisories:  advisoriesSnap.size,
+    total_outbreaks:   outbreaksSnap.size,
+    total_scans:       scansSnap.size,
+    total_yields:      yieldsSnap.size,
+    total_fields:      fieldsSnap.size,
+    total_subsidies:   subsidiesSnap.size,
+    pending_subsidies: subsidies.filter(s => s.status === 'pending').length,
+    total_posts:       postsSnap.size,
+    total_hectares:    Math.round(fields.reduce((a, f) => a + (f.area_hectares || 0), 0) * 10) / 10,
+    total_yield_tons:  Math.round(yields.reduce((a, y) => a + (y.yield_kg || 0) / 1000, 0) * 10) / 10,
+    farmersByRegion:   Object.entries(farmersByRegion).map(([region, count]) => ({ region, count })).sort((a, b) => b.count - a.count),
+    advisoriesByCrop:  Object.entries(advisoriesByCrop).map(([crop_type, count]) => ({ crop_type, count })).sort((a, b) => b.count - a.count),
+    advisoriesBySeverity: Object.entries(advisoriesBySeverity).map(([severity, count]) => ({ severity, count })),
+    outbreaksByRegion: Object.entries(outbreaksByRegion).map(([region, count]) => ({ region, count })).sort((a, b) => b.count - a.count),
+    yieldByCrop:       Object.entries(yieldByCrop).map(([crop_type, { tons, reports }]) => ({ crop_type, tons: Math.round(tons * 10) / 10, reports })).sort((a, b) => b.tons - a.tons),
+    subsidiesByType:   Object.entries(subsidiesByType).map(([resource_type, count]) => ({ resource_type, count })).sort((a, b) => b.count - a.count),
   };
 }

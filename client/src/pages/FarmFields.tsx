@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import api from '../api/client';
+import { getFarmFields, createFarmField, updateFarmField, deleteFarmField } from '../services/firestore';
 import { useAuth } from '../context/AuthContext';
 
 interface Field {
-  field_id: string;
+  id: string;
+  field_id?: string;
   field_name: string;
   crop_type: string;
   area_hectares: number;
@@ -17,23 +18,13 @@ interface Field {
   farmer_region?: string;
 }
 
-interface Summary {
-  region: string;
-  crop_type: string;
-  field_count: number;
-  total_hectares: number;
-  avg_field_size: number;
-}
-
 const CROPS      = ['Maize', 'Vegetables', 'Legumes', 'Poultry', 'Root Crops', 'Fruit', 'Other'];
 const SOILS      = ['Sandy', 'Clay', 'Loam', 'Sandy Loam', 'Clay Loam', 'Silt', 'Unknown'];
 const IRRIGATION = ['none', 'drip', 'sprinkler', 'flood', 'manual'];
-const REGIONS    = ['eThekwini', 'uMgungundlovu', 'iLembe', 'Zululand', 'uThukela'];
 
 export default function FarmFields() {
   const { isAdmin } = useAuth();
   const [fields, setFields]     = useState<Field[]>([]);
-  const [summary, setSummary]   = useState<Summary[]>([]);
   const [loading, setLoading]   = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing]   = useState<Field | null>(null);
@@ -49,16 +40,8 @@ export default function FarmFields() {
   const load = async () => {
     setLoading(true);
     try {
-      if (isAdmin) {
-        const [all, sum] = await Promise.all([
-          api.get('/fields').then(r => r.data),
-          api.get('/fields/summary').then(r => r.data),
-        ]);
-        setFields(all);
-        setSummary(sum);
-      } else {
-        setFields(await api.get('/fields/mine').then(r => r.data));
-      }
+      const data = await getFarmFields();
+      setFields(data as Field[]);
     } catch {}
     setLoading(false);
   };
@@ -80,12 +63,17 @@ export default function FarmFields() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const payload = { ...form, area_hectares: parseFloat(form.area_hectares), gps_lat: form.gps_lat ? parseFloat(form.gps_lat) : undefined, gps_lng: form.gps_lng ? parseFloat(form.gps_lng) : undefined };
+      const payload = {
+        ...form,
+        area_hectares: parseFloat(form.area_hectares),
+        gps_lat: form.gps_lat ? parseFloat(form.gps_lat) : undefined,
+        gps_lng: form.gps_lng ? parseFloat(form.gps_lng) : undefined,
+      };
       if (editing) {
-        await api.put(`/fields/${editing.field_id}`, payload);
+        await updateFarmField(editing.id, payload);
         setSaved('✅ Field updated.');
       } else {
-        await api.post('/fields', payload);
+        await createFarmField(payload);
         setSaved('✅ Field registered successfully!');
       }
       setShowForm(false);
@@ -94,23 +82,41 @@ export default function FarmFields() {
       load();
       setTimeout(() => setSaved(''), 3000);
     } catch (err: any) {
-      setSaved('❌ ' + (err.response?.data?.error || 'Failed'));
+      setSaved('❌ ' + (err.message || 'Failed'));
     }
   };
 
   const startEdit = (f: Field) => {
     setEditing(f);
-    setForm({ field_name: f.field_name, crop_type: f.crop_type, area_hectares: String(f.area_hectares), gps_lat: String(f.gps_lat || ''), gps_lng: String(f.gps_lng || ''), soil_type: f.soil_type || 'Loam', irrigation: f.irrigation, notes: f.notes || '' });
+    setForm({
+      field_name: f.field_name, crop_type: f.crop_type,
+      area_hectares: String(f.area_hectares),
+      gps_lat: String(f.gps_lat || ''), gps_lng: String(f.gps_lng || ''),
+      soil_type: f.soil_type || 'Loam', irrigation: f.irrigation, notes: f.notes || '',
+    });
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleDelete = async (id: string) => {
-    await api.delete(`/fields/${id}`);
+    if (!confirm('Delete this field?')) return;
+    await deleteFarmField(id);
     load();
   };
 
   const totalHa = fields.reduce((a, f) => a + f.area_hectares, 0);
+
+  // Compute summary client-side
+  const summary = Object.values(
+    fields.reduce<Record<string, any>>((acc, f) => {
+      const region = f.farmer_region || 'Unknown';
+      const key = `${region}|${f.crop_type}`;
+      if (!acc[key]) acc[key] = { region, crop_type: f.crop_type, field_count: 0, total_hectares: 0 };
+      acc[key].field_count += 1;
+      acc[key].total_hectares += f.area_hectares || 0;
+      return acc;
+    }, {})
+  ).map((s: any) => ({ ...s, avg_field_size: s.field_count > 0 ? Math.round((s.total_hectares / s.field_count) * 10) / 10 : 0 }));
 
   return (
     <div className="p-4 md:p-7 animate-fade-in">
@@ -135,7 +141,6 @@ export default function FarmFields() {
         }`}>{saved}</div>
       )}
 
-      {/* Form */}
       {showForm && (
         <div className="card animate-scale-in mb-6">
           <h3 className="font-serif text-lg mb-4">{editing ? '✏️ Edit Field' : '📍 Register New Field'}</h3>
@@ -174,7 +179,7 @@ export default function FarmFields() {
                 <input className="input flex-1" placeholder="Longitude" value={form.gps_lng}
                   onChange={e => setForm(f => ({ ...f, gps_lng: e.target.value }))} />
                 <button type="button" onClick={getGPS} disabled={gpsLoading}
-                  className="btn-outline px-3 flex-shrink-0 text-sm" title="Use my current location">
+                  className="btn-outline px-3 flex-shrink-0 text-sm">
                   {gpsLoading ? '⏳' : '📍'}
                 </button>
               </div>
@@ -199,7 +204,6 @@ export default function FarmFields() {
         </div>
       )}
 
-      {/* Admin tabs */}
       {isAdmin && (
         <div className="flex bg-sand rounded-2xl p-1 mb-5 w-fit">
           {(['fields', 'summary'] as const).map(t => (
@@ -226,12 +230,12 @@ export default function FarmFields() {
                 </tr>
               </thead>
               <tbody>
-                {summary.map((s, i) => (
+                {summary.map((s: any, i: number) => (
                   <tr key={i} className="border-b border-sand hover:bg-cream">
                     <td className="py-3 px-3 text-xs text-muted">{s.region?.split('—')[1]?.trim() || s.region || 'Unknown'}</td>
                     <td className="py-3 px-3 font-medium">{s.crop_type}</td>
                     <td className="py-3 px-3 text-center font-bold text-forest">{s.field_count}</td>
-                    <td className="py-3 px-3 font-semibold">{s.total_hectares} ha</td>
+                    <td className="py-3 px-3 font-semibold">{s.total_hectares.toFixed(1)} ha</td>
                     <td className="py-3 px-3 text-muted">{s.avg_field_size} ha</td>
                   </tr>
                 ))}
@@ -248,7 +252,7 @@ export default function FarmFields() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {fields.map(f => (
-            <div key={f.field_id} className="card mb-0">
+            <div key={f.id} className="card mb-0">
               <div className="flex items-start justify-between mb-3">
                 <div>
                   <h3 className="font-semibold text-dark">{f.field_name}</h3>
@@ -282,7 +286,7 @@ export default function FarmFields() {
               {!isAdmin && (
                 <div className="flex gap-2">
                   <button onClick={() => startEdit(f)} className="btn-outline text-xs px-3 py-1.5 flex-1">✏️ Edit</button>
-                  <button onClick={() => handleDelete(f.field_id)} className="btn-danger text-xs px-3 py-1.5">Delete</button>
+                  <button onClick={() => handleDelete(f.id)} className="btn-danger text-xs px-3 py-1.5">Delete</button>
                 </div>
               )}
             </div>

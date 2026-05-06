@@ -1,17 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { getNotifications, markRead, markAllRead } from '../api';
-import type { Notification } from '../types';
+import { getNotifications, markRead, markAllRead } from '../services/firestore';
 import { useLanguage } from '../context/LanguageContext';
 import { useOffline } from '../hooks/useOffline';
-import { useOfflineSync } from '../hooks/useOfflineSync';
 import { timeAgo } from '../utils';
 
 export default function Notifications() {
-  const [notifs, setNotifs] = useState<Notification[]>([]);
+  const [notifs, setNotifs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const { t } = useLanguage();
   const isOffline = useOffline();
-  const { alerts: cachedAlerts, lastSync } = useOfflineSync();
 
   const load = () => getNotifications().then(setNotifs).catch(() => {}).finally(() => setLoading(false));
   useEffect(() => {
@@ -49,35 +46,7 @@ export default function Notifications() {
       {isOffline && (
         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-2.5 mb-4">
           <span>📴</span>
-          <span>Offline — showing cached alerts{lastSync ? ` · last synced ${new Date(lastSync).toLocaleTimeString()}` : ''}</span>
-        </div>
-      )}
-
-      {/* Cached weather alerts shown when offline */}
-      {isOffline && cachedAlerts.length > 0 && (
-        <div className="card max-w-2xl mb-5">
-          <h3 className="font-serif text-base mb-3">⚠️ Cached Weather Alerts</h3>
-          <div className="divide-y divide-sand">
-            {cachedAlerts.map(a => (
-              <div key={a.id} className="flex gap-3 py-3">
-                <span className={`w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 ${
-                  a.severity === 'critical' ? 'bg-red-500' :
-                  a.severity === 'warning'  ? 'bg-amber-500' : 'bg-blue-400'
-                }`} />
-                <div className="flex-1">
-                  <p className="text-sm font-semibold">{a.type}</p>
-                  <p className="text-sm text-muted mt-0.5">{a.message}</p>
-                  <div className="flex gap-3 text-xs text-muted mt-1">
-                    <span>📍 {a.region}</span>
-                    <span className={`badge ${
-                      a.severity === 'critical' ? 'badge-red' :
-                      a.severity === 'warning'  ? 'badge-orange' : 'badge-blue'
-                    }`}>{a.severity}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+          <span>You are offline — connect to load latest notifications.</span>
         </div>
       )}
 
