@@ -45,7 +45,7 @@ function getModel(apiKey: string, modelName: string, language = 'en') {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-async function tryModelsWithList(apiKey: string, models: string[], language: string, fn: (model: ReturnType<typeof getModel>) => Promise<string>): Promise<string> {
+async function tryModelsWithList(apiKey: string, models: string[], language: string, fn: (model: ReturnType<typeof getModel>) => Promise<string>, retryAll = false): Promise<string> {
   let lastErr: any;
   for (const modelName of models) {
     try {
@@ -56,9 +56,11 @@ async function tryModelsWithList(apiKey: string, models: string[], language: str
       lastErr = err;
       const msg = err.message || '';
       const isRateLimit = msg.includes('429') || msg.includes('quota') || msg.includes('high demand') || msg.includes('overloaded') || msg.includes('503');
-      if (msg.includes('404') || !isRateLimit) throw err;
-      console.warn(`⚠️  ${modelName} rate-limited, trying next model...`);
-      await sleep(3000);
+      const is404 = msg.includes('404');
+      if (is404 && !retryAll) throw err;
+      if (!isRateLimit && !retryAll) throw err;
+      console.warn(`⚠️  ${modelName} failed (${msg.slice(0, 60)}), trying next model...`);
+      await sleep(is404 ? 500 : 3000);
     }
   }
   throw lastErr;
@@ -183,24 +185,28 @@ router.post('/scan', authenticate, upload.single('image'), async (req: AuthReque
   }
 
   try {
+    const mimeType = req.file.mimetype;
+    const supportedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif'];
+    const safeMime = supportedTypes.includes(mimeType) ? mimeType : 'image/jpeg';
+
     const imageData = {
       inlineData: {
-        mimeType: req.file.mimetype as 'image/jpeg' | 'image/png' | 'image/webp',
+        mimeType: safeMime as 'image/jpeg' | 'image/png' | 'image/webp',
         data: req.file.buffer.toString('base64'),
       },
     };
     const reply = await tryModelsWithList(apiKey, VISION_MODELS, language, async (model) => {
       const result = await model.generateContent([prompt, imageData]);
       return result.response.text();
-    });
+    }, true);
     logChat(req.user!.id, 'IMAGE_SCAN', `Image scan: ${req.file.originalname || 'photo'}`);
-    // Save scan history + auto-trigger outbreak if disease found (non-blocking)
     triggerScanOutbreak(req.user!.id, reply).catch(console.error);
     const scanMeta = parseScan(reply);
     res.json({ reply, hasDisease: scanMeta.hasDisease, diseaseName: scanMeta.diseaseName, severity: scanMeta.severity });
   } catch (err: any) {
     console.error('Gemini vision error:', err.message);
-    res.status(503).json({ error: 'AI image analysis is currently busy — please wait 30 seconds and try again.' });
+    const fallback = '🔍 I could not analyse this image right now — the vision AI is temporarily unavailable. Please describe what you see (yellowing leaves, spots, wilting, etc.) and I\'ll advise you based on your description.';
+    res.json({ reply: fallback, hasDisease: false, diseaseName: '', severity: 'info' });
   }
 });
 
