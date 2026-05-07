@@ -10,6 +10,7 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
+import { logger } from '../utils/logger';
 
 export interface AppUser {
   id: string;
@@ -55,7 +56,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const snap = await getDoc(doc(db, 'users', fbUser.uid));
           if (snap.exists()) {
-            setUser({ id: fbUser.uid, ...snap.data() } as AppUser);
+            const data = snap.data();
+            setUser({ id: fbUser.uid, ...data } as AppUser);
+            logger.auth('Session restored', `${data.name} (${data.role})`);
           } else {
             setUser({
               id:    fbUser.uid,
@@ -63,8 +66,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               email: fbUser.email || '',
               role:  'farmer',
             });
+            logger.auth('Session restored (no profile)', fbUser.email || fbUser.uid);
           }
-        } catch {
+        } catch (err) {
+          logger.error('Failed to load user profile', err);
           setUser({
             id:    fbUser.uid,
             name:  fbUser.displayName || 'User',
@@ -75,6 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setFirebaseUser(null);
         setUser(null);
+        logger.auth('Session cleared');
       }
       setLoading(false);
     });
@@ -83,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string) => {
     await signInWithEmailAndPassword(auth, email, password);
+    logger.auth('Signed in', email);
   };
 
   const register = async ({ name, email, phone, password, role, region }: RegisterData) => {
@@ -97,9 +104,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       avatar_url: null,
       created_at: new Date().toISOString(),
     });
+    logger.auth('Registered', `${name} (${role || 'farmer'})`);
   };
 
   const logout = async () => {
+    logger.auth('Signed out');
     await signOut(auth);
   };
 

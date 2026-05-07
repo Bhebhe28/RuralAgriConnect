@@ -2,10 +2,28 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { isValidEmail, isStrongPassword } from '../utils';
+import { isValidEmail, isStrongPassword, isValidPhoneZA } from '../utils';
 import { useTheme } from '../context/ThemeContext';
+import { logger } from '../utils/logger';
 
 const REGIONS = ['eThekwini','uMgungundlovu','iLembe','Zululand','uThukela'];
+
+type FieldState = 'idle' | 'valid' | 'error';
+
+function fieldCls(state: FieldState) {
+  if (state === 'valid') return 'input border-green-400 focus:border-green-500 focus:ring-green-200';
+  if (state === 'error') return 'input border-red-400 focus:border-red-500 focus:ring-red-200';
+  return 'input';
+}
+
+function FieldMsg({ state, msg }: { state: FieldState; msg: string }) {
+  if (state === 'idle') return null;
+  return (
+    <p className={`text-xs mt-1 flex items-center gap-1 ${state === 'valid' ? 'text-green-600' : 'text-red-600'}`}>
+      {state === 'valid' ? '✓' : '✕'} {msg}
+    </p>
+  );
+}
 
 export default function Login() {
   const { login, register } = useAuth();
@@ -13,12 +31,16 @@ export default function Login() {
   const { t, language, setLanguage } = useLanguage();
   const { isDark } = useTheme();
   const [tab, setTab] = useState<'login' | 'register'>('login');
-  const [error, setError] = useState('');
+  const [banner, setBanner] = useState<{ msg: string; ok: boolean } | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Login fields
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
+  const [tEmail, setTEmail]     = useState(false);
+  const [tPwd,   setTPwd]       = useState(false);
 
+  // Register fields
   const [regName,   setRegName]   = useState('');
   const [regEmail,  setRegEmail]  = useState('');
   const [regPhone,  setRegPhone]  = useState('');
@@ -26,20 +48,45 @@ export default function Login() {
   const [regRegion, setRegRegion] = useState('KwaZulu-Natal — eThekwini');
   const [regPwd,    setRegPwd]    = useState('');
   const [regPwd2,   setRegPwd2]   = useState('');
+  const [tRName,  setTRName]  = useState(false);
+  const [tREmail, setTREmail] = useState(false);
+  const [tRPhone, setTRPhone] = useState(false);
+  const [tRPwd,   setTRPwd]   = useState(false);
+  const [tRPwd2,  setTRPwd2]  = useState(false);
 
+  // ── derived field states ──────────────────────────────────────
+  const emailState:  FieldState = !tEmail  ? 'idle' : isValidEmail(email)    ? 'valid' : 'error';
+  const pwdState:    FieldState = !tPwd    ? 'idle' : password.length > 0    ? 'valid' : 'error';
+
+  const rNameState:  FieldState = !tRName  ? 'idle' : regName.trim().length >= 2  ? 'valid' : 'error';
+  const rEmailState: FieldState = !tREmail ? 'idle' : isValidEmail(regEmail)      ? 'valid' : 'error';
+  const rPhoneState: FieldState = !tRPhone ? 'idle'
+    : regPhone.trim() === '' ? 'valid'
+    : isValidPhoneZA(regPhone) ? 'valid' : 'error';
+  const rPwdState:   FieldState = !tRPwd   ? 'idle' : isStrongPassword(regPwd)    ? 'valid' : 'error';
+  const rPwd2State:  FieldState = !tRPwd2  ? 'idle' : regPwd2 === regPwd && regPwd2.length > 0 ? 'valid' : 'error';
+
+  // ── handlers ─────────────────────────────────────────────────
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    setBanner(null);
+    setTEmail(true); setTPwd(true);
+    if (!isValidEmail(email)) { setBanner({ msg: 'Please enter a valid email address.', ok: false }); return; }
+    if (!password)             { setBanner({ msg: 'Please enter your password.', ok: false }); return; }
+
     setLoading(true);
+    logger.auth('Login attempt', email);
     try {
       await login(email, password);
+      logger.auth('Login success', email);
       navigate('/dashboard');
     } catch (err: any) {
       const code = err.code || '';
+      logger.error('Login failed', code);
       if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
-        setError('Invalid email or password.');
+        setBanner({ msg: 'Incorrect email or password. Please try again.', ok: false });
       } else {
-        setError(err.message || t.loginFailed);
+        setBanner({ msg: err.message || t.loginFailed, ok: false });
       }
     } finally {
       setLoading(false);
@@ -48,22 +95,30 @@ export default function Login() {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    if (!isValidEmail(regEmail))   { setError('Please enter a valid email address.'); return; }
-    if (!isStrongPassword(regPwd)) { setError('Password must be 8+ chars with uppercase, lowercase and a number.'); return; }
-    if (regPwd !== regPwd2)        { setError(t.loginPasswordMismatch); return; }
+    setBanner(null);
+    setTRName(true); setTREmail(true); setTRPhone(true); setTRPwd(true); setTRPwd2(true);
+
+    if (regName.trim().length < 2)    { setBanner({ msg: 'Full name must be at least 2 characters.', ok: false }); return; }
+    if (!isValidEmail(regEmail))       { setBanner({ msg: 'Please enter a valid email address.', ok: false }); return; }
+    if (regPhone.trim() && !isValidPhoneZA(regPhone)) { setBanner({ msg: 'Phone must be a valid SA number e.g. 082 000 0000.', ok: false }); return; }
+    if (!isStrongPassword(regPwd))     { setBanner({ msg: 'Password needs 8+ characters with uppercase, lowercase and a number.', ok: false }); return; }
+    if (regPwd !== regPwd2)            { setBanner({ msg: t.loginPasswordMismatch, ok: false }); return; }
+
     setLoading(true);
+    logger.auth('Register attempt', regEmail);
     try {
       await register({ name: regName, email: regEmail, phone: regPhone, password: regPwd, role: regRole, region: regRegion });
+      logger.auth('Register success', regEmail);
       setTab('login');
       setEmail(regEmail);
-      setError('✅ Account created! Sign in below.');
+      setBanner({ msg: '✅ Account created! Sign in below.', ok: true });
     } catch (err: any) {
       const code = err.code || '';
+      logger.error('Register failed', code);
       if (code === 'auth/email-already-in-use') {
-        setError('This email is already registered.');
+        setBanner({ msg: 'This email is already registered. Try signing in instead.', ok: false });
       } else {
-        setError(err.message || t.loginRegisterFailed);
+        setBanner({ msg: err.message || t.loginRegisterFailed, ok: false });
       }
     } finally {
       setLoading(false);
@@ -76,12 +131,10 @@ export default function Login() {
       {/* ── Left panel — branding ── */}
       <div className="hidden md:flex md:w-5/12 lg:w-1/2 bg-gradient-to-br from-forest via-forest-mid to-moss
                       flex-col justify-between p-10 relative overflow-hidden">
-        {/* Background circles */}
         <div className="absolute -top-20 -right-20 w-72 h-72 bg-white/5 rounded-full" />
         <div className="absolute -bottom-16 -left-16 w-56 h-56 bg-white/5 rounded-full" />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-white/3 rounded-full" />
 
-        {/* Logo */}
         <div className="relative flex items-center gap-3 animate-fade-in">
           <div className="w-11 h-11 bg-white/20 border border-white/30 rounded-xl flex items-center justify-center text-2xl">🌿</div>
           <div>
@@ -90,7 +143,6 @@ export default function Login() {
           </div>
         </div>
 
-        {/* Hero text */}
         <div className="relative animate-fade-in-up">
           <h2 className="font-serif text-white text-3xl lg:text-4xl leading-tight mb-4">
             Offline Farm<br />
@@ -100,8 +152,6 @@ export default function Login() {
           <p className="text-white/65 text-sm leading-relaxed mb-8 max-w-sm">
             Expert crop advisories, AI disease diagnosis, and weather alerts — works even with no signal in remote KZN fields.
           </p>
-
-          {/* Feature pills */}
           <div className="flex flex-wrap gap-2">
             {['📴 Works Offline','🤖 AI Diagnosis','🌦 Weather Alerts','🌍 4 Languages'].map(f => (
               <span key={f} className="bg-white/15 border border-white/20 text-white text-xs px-3 py-1.5 rounded-full font-medium">
@@ -111,7 +161,6 @@ export default function Login() {
           </div>
         </div>
 
-        {/* Bottom quote */}
         <div className="relative border-t border-white/15 pt-5 animate-fade-in">
           <p className="text-white/50 text-xs italic">
             "I was in a remote field with no signal. I opened RurAgriConnect and got the advisory offline."
@@ -163,7 +212,7 @@ export default function Login() {
           {/* Tabs */}
           <div className={`flex rounded-2xl p-1 mb-6 ${isDark ? 'bg-night-card' : 'bg-sand'}`}>
             {(['login','register'] as const).map(t_ => (
-              <button key={t_} onClick={() => { setTab(t_); setError(''); }}
+              <button key={t_} onClick={() => { setTab(t_); setBanner(null); }}
                 className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all
                   ${tab === t_
                     ? isDark
@@ -178,14 +227,14 @@ export default function Login() {
             ))}
           </div>
 
-          {/* Error / success */}
-          {error && (
+          {/* Banner */}
+          {banner && (
             <div className={`rounded-xl px-4 py-3 mb-5 text-sm border animate-fade-in ${
-              error.startsWith('✅')
+              banner.ok
                 ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                 : 'bg-red-50 border-red-200 text-red-800'
             }`}>
-              {error}
+              {banner.msg}
             </div>
           )}
 
@@ -194,15 +243,29 @@ export default function Login() {
             <form onSubmit={handleLogin} className="space-y-4 animate-fade-in">
               <div>
                 <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginEmail}</label>
-                <input className="input" type="email" value={email}
+                <input
+                  className={fieldCls(emailState)}
+                  type="email"
+                  value={email}
                   onChange={e => setEmail(e.target.value)}
-                  placeholder="farmer@example.com" required />
+                  onBlur={() => setTEmail(true)}
+                  placeholder="farmer@example.com"
+                  required
+                />
+                <FieldMsg state={emailState} msg={emailState === 'valid' ? 'Valid email address' : 'Enter a valid email address'} />
               </div>
               <div>
                 <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginPassword}</label>
-                <input className="input" type="password" value={password}
+                <input
+                  className={fieldCls(pwdState)}
+                  type="password"
+                  value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••" required />
+                  onBlur={() => setTPwd(true)}
+                  placeholder="••••••••"
+                  required
+                />
+                <FieldMsg state={pwdState} msg={pwdState === 'valid' ? 'Password entered' : 'Password is required'} />
                 <div className="text-right mt-1.5">
                   <button
                     type="button"
@@ -219,10 +282,6 @@ export default function Login() {
                   ? <span className="flex items-center justify-center gap-2"><span className="typing-dot"/><span className="typing-dot"/><span className="typing-dot"/></span>
                   : t.loginBtn}
               </button>
-              <div className={`rounded-xl px-4 py-3 text-center ${isDark ? 'bg-night-card border border-night-border' : 'bg-sand/60'}`}>
-                <p className={`text-xs ${isDark ? 'text-night-muted' : 'text-muted'}`}>Demo account</p>
-                <p className={`text-xs font-semibold mt-0.5 ${isDark ? 'text-night-primary' : 'text-forest'}`}>admin@farm.co.za · Admin@123</p>
-              </div>
             </form>
 
           ) : (
@@ -230,18 +289,40 @@ export default function Login() {
             <form onSubmit={handleRegister} className="space-y-4 animate-fade-in">
               <div>
                 <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginFullName}</label>
-                <input className="input" value={regName} onChange={e => setRegName(e.target.value)}
-                  placeholder="Sipho Dlamini" required />
+                <input
+                  className={fieldCls(rNameState)}
+                  value={regName}
+                  onChange={e => setRegName(e.target.value)}
+                  onBlur={() => setTRName(true)}
+                  placeholder="Sipho Dlamini"
+                  required
+                />
+                <FieldMsg state={rNameState} msg={rNameState === 'valid' ? 'Looks good' : 'Full name is required'} />
               </div>
               <div>
                 <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginEmail}</label>
-                <input className="input" type="email" value={regEmail} onChange={e => setRegEmail(e.target.value)}
-                  placeholder="sipho@farm.co.za" required />
+                <input
+                  className={fieldCls(rEmailState)}
+                  type="email"
+                  value={regEmail}
+                  onChange={e => setRegEmail(e.target.value)}
+                  onBlur={() => setTREmail(true)}
+                  placeholder="sipho@farm.co.za"
+                  required
+                />
+                <FieldMsg state={rEmailState} msg={rEmailState === 'valid' ? 'Valid email address' : 'Enter a valid email address'} />
               </div>
               <div>
-                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginPhone}</label>
-                <input className="input" type="tel" value={regPhone} onChange={e => setRegPhone(e.target.value)}
-                  placeholder="+27 83 000 0000" />
+                <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginPhone} <span className={`normal-case font-normal ${isDark ? 'text-night-muted' : 'text-muted'}`}>(optional)</span></label>
+                <input
+                  className={fieldCls(rPhoneState)}
+                  type="tel"
+                  value={regPhone}
+                  onChange={e => setRegPhone(e.target.value)}
+                  onBlur={() => setTRPhone(true)}
+                  placeholder="+27 83 000 0000"
+                />
+                <FieldMsg state={rPhoneState} msg={rPhoneState === 'valid' ? 'Valid SA number' : 'Use format: 082 000 0000 or +27 82 000 0000'} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -263,13 +344,29 @@ export default function Login() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginPassword}</label>
-                  <input className="input" type="password" value={regPwd} onChange={e => setRegPwd(e.target.value)}
-                    placeholder="Min 8 chars" required />
+                  <input
+                    className={fieldCls(rPwdState)}
+                    type="password"
+                    value={regPwd}
+                    onChange={e => setRegPwd(e.target.value)}
+                    onBlur={() => setTRPwd(true)}
+                    placeholder="Min 8 chars"
+                    required
+                  />
+                  <FieldMsg state={rPwdState} msg={rPwdState === 'valid' ? 'Strong password' : '8+ chars, uppercase, lowercase, number'} />
                 </div>
                 <div>
                   <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>Confirm</label>
-                  <input className="input" type="password" value={regPwd2} onChange={e => setRegPwd2(e.target.value)}
-                    placeholder="Repeat" required />
+                  <input
+                    className={fieldCls(rPwd2State)}
+                    type="password"
+                    value={regPwd2}
+                    onChange={e => setRegPwd2(e.target.value)}
+                    onBlur={() => setTRPwd2(true)}
+                    placeholder="Repeat"
+                    required
+                  />
+                  <FieldMsg state={rPwd2State} msg={rPwd2State === 'valid' ? 'Passwords match' : 'Passwords do not match'} />
                 </div>
               </div>
               <button type="submit" disabled={loading}
@@ -281,7 +378,6 @@ export default function Login() {
             </form>
           )}
 
-          {/* Back to landing */}
           <button onClick={() => navigate('/')}
             className={`w-full mt-4 text-sm transition-colors bg-transparent border-0 cursor-pointer py-2 ${isDark ? 'text-night-muted hover:text-night-primary' : 'text-muted hover:text-forest'}`}>
             ← Back to home
