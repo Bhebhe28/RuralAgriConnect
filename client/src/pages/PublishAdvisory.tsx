@@ -35,7 +35,7 @@ export default function PublishAdvisory() {
   };
 
   return (
-    <div className="p-7 animate-fade-in">
+    <div className="p-4 md:p-7 animate-fade-in">
       <h2 className="text-2xl font-serif mb-1">{t.publishTitle}</h2>
       <p className="text-sm text-muted mb-6">{t.publishSubtitle}</p>
 

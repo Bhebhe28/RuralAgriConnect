@@ -239,7 +239,7 @@ export async function getCommunityPost(id: string) {
   if (!p.author_avatar && p.user_id && !missingIds.includes(p.user_id)) missingIds.push(p.user_id);
 
   const avatarMap: Record<string, string | null> = {};
-  await Promise.all(missingIds.map(async (uid) => {
+  await Promise.allSettled(missingIds.map(async (uid) => {
     const uSnap = await getDoc(doc(db, 'users', uid));
     if (uSnap.exists()) avatarMap[uid] = uSnap.data().avatar_url || null;
   }));
@@ -498,12 +498,15 @@ export async function createOutbreak(data: any) {
     outbreak_id: id, ...data, reported_by: userId, reported_by_name: reporterName,
     reported_date: now, source,
   });
-  batch.set(doc(db, 'notifications', notifId), {
-    user_id: 'broadcast', type: 'outbreak',
-    title: `${severityEmoji} Outbreak Report: ${data.pest_name || data.description?.slice(0, 40) || 'Pest Alert'}`,
-    message: `${farmerName} reported a ${data.severity} outbreak in ${(data.region || '').split('—')[1]?.trim() || data.region}. Crop: ${data.crop_affected || data.crop_type}. ${data.description?.slice(0, 100) || ''}`,
-    read: 0, created_at: now,
-  });
+  // Only send broadcast notifications for farmer/admin reports, not AI feed items
+  if (source !== 'feed') {
+    batch.set(doc(db, 'notifications', notifId), {
+      user_id: 'broadcast', type: 'outbreak',
+      title: `${severityEmoji} Outbreak Report: ${data.pest_name || data.description?.slice(0, 40) || 'Pest Alert'}`,
+      message: `${farmerName} reported a ${data.severity} outbreak in ${(data.region || '').split('—')[1]?.trim() || data.region}. Crop: ${data.crop_affected || data.crop_type}. ${data.description?.slice(0, 100) || ''}`,
+      read: 0, created_at: now,
+    });
+  }
   await batch.commit();
   return { id };
 }
@@ -551,7 +554,7 @@ export async function saveCropScan(data: { diagnosis: string; crop_type: string;
       severity:      data.severity,
       reported_by:   userId,
       reported_date: now,
-      source:        'ai_scan',
+      source:        'scan',
       description:   `AI scan detected ${data.disease_name} in ${data.crop_type}. Reported by ${farmerName} in ${region}.`,
     });
 
@@ -569,7 +572,13 @@ export async function saveCropScan(data: { diagnosis: string; crop_type: string;
 }
 
 export async function getCropScans() {
-  const snap_ = await getDocs(query(collection(db, 'crop_scans'), orderBy('created_at', 'desc'), limit(50)));
+  const userId = uid();
+  // Security rule only allows reading own scans (unless admin); filter here to match
+  const isAdmin = (await getDoc(doc(db, 'users', userId))).data()?.role === 'admin';
+  const q = isAdmin
+    ? query(collection(db, 'crop_scans'), orderBy('created_at', 'desc'), limit(50))
+    : query(collection(db, 'crop_scans'), where('user_id', '==', userId), orderBy('created_at', 'desc'), limit(50));
+  const snap_ = await getDocs(q);
   return snap_.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 

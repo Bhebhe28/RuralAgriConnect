@@ -7,22 +7,26 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
+      includeAssets: ['apple-touch-icon.png', 'favicon-32x32.png'],
       manifest: {
-        name: 'RuralAgriConnect',
+        name: 'RurAgriConnect — Farm Advisory',
         short_name: 'AgriConnect',
         description: 'Offline-first farm advisory app for KwaZulu-Natal farmers',
-        theme_color: '#2d6a4f',
-        background_color: '#f5f0e8',
+        theme_color: '#1B4332',
+        background_color: '#1B4332',
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',
+        scope: '/',
+        categories: ['agriculture', 'utilities'],
         icons: [
-          { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
-          { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+          { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
       workbox: {
+        cleanupOutdatedCaches: true,
         // Cache all app assets
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         // Cache API responses for offline use
@@ -84,6 +88,28 @@ export default defineConfig({
             options: {
               cacheName: 'community-cache',
               expiration: { maxEntries: 100, maxAgeSeconds: 24 * 60 * 60 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // Open-Meteo weather API — NetworkFirst so live data is always preferred
+            urlPattern: /^https:\/\/api\.open-meteo\.com\//,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'openmeteo-weather-cache',
+              networkTimeoutSeconds: 10,
+              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // Open-Meteo geocoding API — NetworkFirst, short TTL
+            urlPattern: /^https:\/\/geocoding-api\.open-meteo\.com\//,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'openmeteo-geocoding-cache',
+              networkTimeoutSeconds: 10,
+              expiration: { maxEntries: 50, maxAgeSeconds: 24 * 60 * 60 },
               cacheableResponse: { statuses: [0, 200] },
             },
           },

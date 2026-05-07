@@ -6,15 +6,16 @@ export default function ManageFarmers() {
   const [users, setUsers]   = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
   const { t } = useLanguage();
 
   const load = () => getUsers().then(setUsers).catch(() => {}).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`${t.farmersRemoveConfirm} ${name || 'this user'}?`)) return;
+  const handleDelete = async (id: string) => {
     await deleteUser(id);
     setUsers(prev => prev.filter(u => u.id !== id));
+    setConfirmId(null);
   };
 
   const filtered = users.filter(u =>
@@ -23,7 +24,7 @@ export default function ManageFarmers() {
   );
 
   return (
-    <div className="p-7 animate-fade-in">
+    <div className="p-4 md:p-7 animate-fade-in">
       <h2 className="text-2xl font-serif mb-1">{t.farmersTitle}</h2>
       <p className="text-sm text-muted mb-6">{t.farmersSubtitle}</p>
 
@@ -59,7 +60,14 @@ export default function ManageFarmers() {
                   <td className="py-3 px-3 text-muted text-xs">{u.region?.split('—')[1]?.trim() || '—'}</td>
                   <td className="py-3 px-3 text-muted text-xs">{new Date(u.created_at).toLocaleDateString()}</td>
                   <td className="py-3 px-3">
-                    <button onClick={() => handleDelete(u.id, u.name)} className="btn-danger text-xs px-3 py-1">{t.remove}</button>
+                    {confirmId === u.id ? (
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => handleDelete(u.id)} className="btn-danger text-xs px-2 py-1">Yes</button>
+                        <button onClick={() => setConfirmId(null)} className="btn-outline text-xs px-2 py-1">No</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setConfirmId(u.id)} className="btn-danger text-xs px-3 py-1">{t.remove}</button>
+                    )}
                   </td>
                 </tr>
               ))}

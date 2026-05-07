@@ -178,6 +178,8 @@ export default function Community() {
   const [newPost, setNewPost]       = useState({ title:'', body:'', category:'general' });
   const [readPosts, setReadPosts]   = useState<Set<string>>(new Set());
   const [locLoading, setLocLoading] = useState(false);
+  const [sendError, setSendError]   = useState('');
+  const [attachError, setAttachError] = useState('');
 
   const endRef    = useRef<HTMLDivElement>(null);
   const fileRef   = useRef<HTMLInputElement>(null);
@@ -210,17 +212,22 @@ export default function Community() {
   }, [posts]);
 
   const openPost = useCallback(async (id: string) => {
-    const d = await getCommunityPost(id);
-    const detail = d as PostDetail;
-    setSelected(detail);
-    setReadPosts(prev => { const s = new Set(prev); s.add(id); return s; });
-    markRead(id, detail.reply_count); // persist so refresh keeps it read
+    try {
+      const d = await getCommunityPost(id);
+      const detail = d as PostDetail;
+      setSelected(detail);
+      setReadPosts(prev => { const s = new Set(prev); s.add(id); return s; });
+      markRead(id, detail.reply_count);
+    } catch (err) {
+      console.error('Failed to open post:', err);
+    }
   }, []);
 
   // ── Send ──────────────────────────────────────────────────────
   const handleSend = async () => {
     if ((!msgText.trim() && !pendingMedia) || !selected || submitting) return;
     setSubmitting(true);
+    setSendError('');
     try {
       const pm = pendingMedia;
       const bodyMap: Record<MediaType, string> = {
@@ -231,6 +238,9 @@ export default function Community() {
       await addReply(selected.post_id, txt, pm?.url, pm?.type, user?.avatar_url, pm?.name);
       setMsgText(''); setPendingMedia(null);
       await openPost(selected.post_id);
+    } catch (err: any) {
+      setSendError(navigator.onLine ? 'Failed to send. Please try again.' : 'No internet — message will send when back online.');
+      console.error('Send failed:', err);
     } finally { setSubmitting(false); }
   };
 
@@ -247,9 +257,10 @@ export default function Community() {
     const file = e.target.files?.[0]; if (!file) return;
     setShowAttach(false);
     if (file.size > 450 * 1024) {
-      alert('File too large. Max 450 KB for documents.');
+      setAttachError('File too large. Max 450 KB for documents.');
       if (e.target) e.target.value = ''; return;
     }
+    setAttachError('');
     try { setPendingMedia({ url: await fileToDataUrl(file), type:'document', name: file.name }); } catch {/**/}
     if (e.target) e.target.value = '';
   };
@@ -257,15 +268,16 @@ export default function Community() {
   // ── Location ──────────────────────────────────────────────────
   const handleLocation = () => {
     setShowAttach(false);
-    if (!navigator.geolocation) { alert('Location not supported on this device.'); return; }
+    if (!navigator.geolocation) { setAttachError('Location not supported on this device.'); return; }
     setLocLoading(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setLocLoading(false);
+        setAttachError('');
         const { latitude: lat, longitude: lng } = pos.coords;
         setPendingMedia({ url: JSON.stringify({ lat, lng }), type:'location' });
       },
-      () => { setLocLoading(false); alert('Could not get location. Check browser permissions.'); }
+      () => { setLocLoading(false); setAttachError('Could not get location. Check that location permission is allowed for this app.'); }
     );
   };
 
@@ -364,10 +376,10 @@ export default function Community() {
       )}
 
       {/* ── Main two-panel layout ─────────────────────────────── */}
-      <div className="flex overflow-hidden" style={{ height:'100%' }}>
+      <div className="flex overflow-hidden flex-1 min-h-0">
 
         {/* ═══ LEFT: Conversation list ════════════════════════════ */}
-        <div className={`flex flex-col flex-shrink-0 border-r ${selected ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-96`}
+        <div className={`flex flex-col flex-shrink-0 min-h-0 border-r ${selected ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-96`}
           style={{ borderColor:divider, background:panelBg }}>
 
           {/* Header */}
@@ -442,7 +454,7 @@ export default function Community() {
         </div>
 
         {/* ═══ RIGHT: Chat view ════════════════════════════════════ */}
-        <div className={`flex-1 flex-col ${selected ? 'flex' : 'hidden md:flex'}`}>
+        <div className={`flex-1 flex-col min-h-0 ${selected ? 'flex' : 'hidden md:flex'}`}>
           {!selected ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-4 h-full"
               style={{ background: isDark?'#222e35':'#f0f2f5' }}>
@@ -600,6 +612,21 @@ export default function Community() {
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Attach error */}
+              {attachError && (
+                <div className="px-4 py-1.5 flex-shrink-0 text-center text-xs flex items-center justify-between gap-2" style={{ background:'#ff000015', color:'#e53935' }}>
+                  <span>{attachError}</span>
+                  <button onClick={() => setAttachError('')} className="text-xs opacity-70">✕</button>
+                </div>
+              )}
+
+              {/* Send error */}
+              {sendError && (
+                <div className="px-4 py-1.5 flex-shrink-0 text-center text-xs" style={{ background:'#ff000015', color:'#e53935' }}>
+                  {sendError}
                 </div>
               )}
 

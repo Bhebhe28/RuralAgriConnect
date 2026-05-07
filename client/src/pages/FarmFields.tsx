@@ -98,9 +98,11 @@ export default function FarmFields() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this field?')) return;
     await deleteFarmField(id);
+    setConfirmDeleteId(null);
     load();
   };
 
@@ -286,7 +288,14 @@ export default function FarmFields() {
               {!isAdmin && (
                 <div className="flex gap-2">
                   <button onClick={() => startEdit(f)} className="btn-outline text-xs px-3 py-1.5 flex-1">✏️ Edit</button>
-                  <button onClick={() => handleDelete(f.id)} className="btn-danger text-xs px-3 py-1.5">Delete</button>
+                  {confirmDeleteId === f.id ? (
+                    <div className="flex gap-1">
+                      <button onClick={() => handleDelete(f.id)} className="btn-danger text-xs px-3 py-1.5">Confirm</button>
+                      <button onClick={() => setConfirmDeleteId(null)} className="btn-outline text-xs px-3 py-1.5">Cancel</button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setConfirmDeleteId(f.id)} className="btn-danger text-xs px-3 py-1.5">Delete</button>
+                  )}
                 </div>
               )}
             </div>

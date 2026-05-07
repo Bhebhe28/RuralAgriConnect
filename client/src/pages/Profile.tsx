@@ -78,7 +78,7 @@ export default function Profile() {
   const initials = (name || user?.name || '?').charAt(0).toUpperCase();
 
   return (
-    <div className="p-7 animate-fade-in max-w-xl">
+    <div className="p-4 md:p-7 animate-fade-in max-w-xl">
       <h2 className="text-2xl font-serif mb-1">{t.profileEditTitle}</h2>
       <p className="text-sm text-muted mb-6">Update your account information and profile photo.</p>
 

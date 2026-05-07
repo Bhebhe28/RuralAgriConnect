@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
-import { getDocs, setDoc, updateDoc, deleteDoc, now } from '../db/firestore';
+import { getDocs, getDoc, setDoc, updateDoc, deleteDoc, now } from '../db/firestore';
 import { isValidEmail, isStrongPassword } from '../utils';
 import { sendPasswordResetEmail } from '../services/emailService';
 
@@ -16,12 +16,22 @@ router.post('/login', async (req: Request, res: Response) => {
   const user = users[0];
 
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+    // Log failed attempt (don't reveal whether email exists)
+    await setDoc('activity_logs', uuidv4(), {
+      user_id: null, action: 'LOGIN_FAILED',
+      entity_type: 'auth', entity_id: null,
+      details: `Failed login attempt for: ${email}`,
+      created_at: now(),
+    });
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) return res.status(500).json({ error: 'Server configuration error' });
+
   const token = jwt.sign(
     { id: user.id, role: user.role || 'farmer', email: user.email },
-    process.env.JWT_SECRET || 'secret',
+    jwtSecret,
     { expiresIn: '7d' }
   );
 

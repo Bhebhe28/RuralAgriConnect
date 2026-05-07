@@ -42,7 +42,26 @@ interface GeoResult {
   displayName: string;
 }
 
-const LS_KEY = 'weather_location';
+const LS_KEY       = 'weather_location';
+const CACHE_DIST   = 'weather_districts_cache';
+const CACHE_LOC    = 'weather_loc_cache';
+
+function saveCache(key: string, data: unknown) {
+  try { localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() })); } catch {/**/}
+}
+function loadCache<T>(key: string): { data: T; ts: number } | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+function cacheAge(ts: number) {
+  const mins = Math.round((Date.now() - ts) / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  return hrs < 24 ? `${hrs}h ago` : `${Math.round(hrs / 24)}d ago`;
+}
 
 const KZN_DISTRICTS = [
   { name: 'eThekwini',      region: 'KwaZulu-Natal — eThekwini',      lat: -29.8587, lon: 31.0218 },
@@ -178,12 +197,13 @@ function LocationSetup({ onDone }: { onDone: (loc: SavedLocation) => void }) {
     if (!cityQuery.trim()) return;
     setCityError('');
     setSugLoading(true);
-    const results = await geocode(cityQuery.trim()).catch(() => []);
+    let results: GeoResult[] = [];
+    let networkFailed = false;
+    try { results = await geocode(cityQuery.trim()); }
+    catch { networkFailed = true; }
     setSugLoading(false);
-    if (results.length === 0) {
-      setCityError('City not found. Try a different spelling.');
-      return;
-    }
+    if (networkFailed) { setCityError('No internet connection. Connect and try again.'); return; }
+    if (results.length === 0) { setCityError('City not found. Try a different spelling.'); return; }
     pickSuggestion(results[0]);
   };
 
@@ -198,8 +218,10 @@ function LocationSetup({ onDone }: { onDone: (loc: SavedLocation) => void }) {
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        // Save location regardless of internet — weather fetch happens after
         const loc: SavedLocation = { type: 'gps', lat: pos.coords.latitude, lon: pos.coords.longitude, displayName: 'Current Location' };
         localStorage.setItem(LS_KEY, JSON.stringify(loc));
+        setGpsState('idle');
         onDone(loc);
       },
       (err) => {
@@ -302,34 +324,57 @@ export default function Weather() {
   const [refreshing,  setRefreshing]  = useState(false);
   const [locError,    setLocError]    = useState('');
 
+  const [cacheTs, setCacheTs] = useState<number | null>(null);
+
   const loadDistricts = useCallback(async () => {
+    // Show cached data immediately
+    const cached = loadCache<WeatherData[]>(CACHE_DIST);
+    if (cached) {
+      setDistricts(cached.data);
+      setAlerts(deriveAlerts(cached.data));
+      setCacheTs(cached.ts);
+      setLoading(false);
+    }
+    // Try live fetch
     try {
-      const results = await Promise.all(
+      const settled = await Promise.allSettled(
         KZN_DISTRICTS.map(async (d) => {
           const w = await fetchByCoords(d.lat, d.lon);
           return { ...w, region: d.region };
         })
       );
-      setDistricts(results);
-      setAlerts(deriveAlerts(results));
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+      const results = settled
+        .filter((r): r is PromiseFulfilledResult<WeatherData> => r.status === 'fulfilled')
+        .map(r => r.value);
+      if (results.length > 0) {
+        setDistricts(results);
+        setAlerts(deriveAlerts(results));
+        saveCache(CACHE_DIST, results);
+        setCacheTs(Date.now());
+      }
+    } catch {/**/}
+    finally { setLoading(false); }
   }, []);
 
   const fetchLocWeather = useCallback(async (loc: SavedLocation) => {
     setLocError('');
     if (!loc.lat || !loc.lon) return;
+    // Show cached loc weather immediately
+    const cached = loadCache<WeatherData>(CACHE_LOC);
+    if (cached) {
+      setLocWeather(cached.data);
+      setSelected(cached.data);
+    }
+    // Try live fetch
     try {
       const w = await fetchByCoords(loc.lat, loc.lon);
-      const updated = { ...loc, displayName: loc.displayName };
-      localStorage.setItem(LS_KEY, JSON.stringify(updated));
-      setLocWeather({ ...w, city: loc.city, region: loc.displayName });
-      setSelected({ ...w, city: loc.city, region: loc.displayName });
+      const live = { ...w, city: loc.city, region: loc.displayName };
+      setLocWeather(live);
+      setSelected(live);
+      saveCache(CACHE_LOC, live);
+      setCacheTs(Date.now());
     } catch {
-      setLocError('Could not load weather for your location. Check your connection.');
+      if (!cached) setLocError('No internet — connect to load weather for your location.');
     }
   }, []);
 
@@ -338,6 +383,13 @@ export default function Weather() {
     if (savedLoc) fetchLocWeather(savedLoc);
     else setLoading(false);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-retry when network comes back
+  useEffect(() => {
+    const retry = () => { loadDistricts(); if (savedLoc) fetchLocWeather(savedLoc); };
+    window.addEventListener('online', retry);
+    return () => window.removeEventListener('online', retry);
+  }, [savedLoc, loadDistricts, fetchLocWeather]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -348,6 +400,7 @@ export default function Weather() {
 
   const changeLocation = () => {
     localStorage.removeItem(LS_KEY);
+    localStorage.removeItem(CACHE_LOC);
     setSavedLoc(null);
     setLocWeather(null);
     setSelected(null);
@@ -378,9 +431,19 @@ export default function Weather() {
         </button>
       </div>
 
+      {cacheTs && (
+        <p className={`text-xs mb-3 ${isDark ? 'text-night-muted' : 'text-muted'}`}>
+          {navigator.onLine ? '🟢 Live' : '📴 Offline —'} last updated {cacheAge(cacheTs)}
+        </p>
+      )}
+
       {locError && (
-        <div className={`rounded-2xl px-4 py-3 mb-4 text-sm border ${isDark ? 'bg-red-900/20 border-red-700 text-red-300' : 'bg-red-50 border-red-300 text-red-800'}`}>
-          ⚠ {locError} — <button onClick={changeLocation} className="underline cursor-pointer bg-transparent border-0 font-semibold">Set a different location</button>
+        <div className={`rounded-2xl px-4 py-3 mb-4 text-sm border flex items-center justify-between gap-3 flex-wrap ${isDark ? 'bg-amber-900/20 border-amber-700 text-amber-300' : 'bg-amber-50 border-amber-300 text-amber-800'}`}>
+          <span>📴 {locError}</span>
+          <button onClick={() => savedLoc && fetchLocWeather(savedLoc)}
+            className="underline cursor-pointer bg-transparent border-0 font-semibold flex-shrink-0">
+            Retry
+          </button>
         </div>
       )}
 

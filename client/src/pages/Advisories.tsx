@@ -44,7 +44,7 @@ export function AdvisoriesList() {
   });
 
   return (
-    <div className="p-7 animate-fade-in">
+    <div className="p-4 md:p-7 animate-fade-in">
       <h2 className="text-2xl font-serif mb-1">{t.advisoriesTitle}</h2>
       <p className="text-sm text-muted mb-6">{t.advisoriesSubtitle}</p>
 
@@ -96,10 +96,10 @@ export function AdvisoryDetail() {
     if (id) getAdvisory(id).then(setAdvisory).catch(() => navigate('/advisories'));
   }, [id]);
 
-  if (!advisory) return <div className="p-7 text-muted">{t.loading}</div>;
+  if (!advisory) return <div className="p-4 md:p-7 text-muted">{t.loading}</div>;
 
   return (
-    <div className="p-7 max-w-3xl animate-fade-in">
+    <div className="p-4 md:p-7 max-w-3xl animate-fade-in">
       <button onClick={() => navigate('/advisories')} className="btn-outline mb-5 text-sm">{t.back}</button>
       <div className="card">
         <div className="flex items-start justify-between mb-4">

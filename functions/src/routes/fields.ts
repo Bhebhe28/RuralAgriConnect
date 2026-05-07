@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { getDocs, setDoc, updateDoc, deleteDoc, now } from '../db/firestore';
+import { getDocs, getDoc, setDoc, updateDoc, deleteDoc, now } from '../db/firestore';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -41,6 +41,11 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
 });
 
 router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
+  const field = await getDoc<any>('farm_fields', req.params.id);
+  if (!field) return res.status(404).json({ error: 'Field not found' });
+  if (field.farmer_id !== req.user!.id && req.user!.role !== 'admin')
+    return res.status(403).json({ error: 'Not allowed' });
+
   const { field_name, crop_type, area_hectares, gps_lat, gps_lng, soil_type, irrigation, notes } = req.body;
   await updateDoc('farm_fields', req.params.id, {
     field_name, crop_type, area_hectares: parseFloat(area_hectares),
@@ -52,7 +57,17 @@ router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
 });
 
 router.delete('/:id', authenticate, async (req: AuthRequest, res: Response) => {
+  const field = await getDoc<any>('farm_fields', req.params.id);
+  if (!field) return res.status(404).json({ error: 'Field not found' });
+  if (field.farmer_id !== req.user!.id && req.user!.role !== 'admin')
+    return res.status(403).json({ error: 'Not allowed' });
+
   await deleteDoc('farm_fields', req.params.id);
+  await setDoc('activity_logs', require('uuid').v4(), {
+    user_id: req.user!.id, action: 'DELETE_FIELD',
+    entity_type: 'farm_field', entity_id: req.params.id,
+    details: `Deleted field: ${field.field_name}`, created_at: now(),
+  });
   res.json({ message: 'Field deleted' });
 });
 

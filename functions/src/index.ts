@@ -44,6 +44,14 @@ const authLimiter = rateLimit({
   message: { error: 'Too many attempts, please try again in 15 minutes.' },
 });
 
+// Stricter limit for password reset — prevents email bombing
+const resetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, max: 5,
+  message: { error: 'Too many reset requests, please try again in 1 hour.' },
+});
+
+app.use('/auth/forgot-password', resetLimiter);
+app.use('/auth/reset-password',  resetLimiter);
 app.use('/auth',          authLimiter, authRoutes);
 app.use('/advisories',    advisoryRoutes);
 app.use('/weather',       weatherRoutes);

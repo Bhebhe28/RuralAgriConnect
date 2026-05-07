@@ -32,7 +32,7 @@ export default function Notifications() {
   const unread = notifs.filter(n => !n.read).length;
 
   return (
-    <div className="p-7 animate-fade-in">
+    <div className="p-4 md:p-7 animate-fade-in">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-2xl font-serif">{t.notifTitle}</h2>

@@ -32,6 +32,14 @@ export default function Chatbot() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Reset conversation when language changes so greeting and AI context match the new language
+  useEffect(() => {
+    setMessages([{ role: 'bot', text: t.chatGreeting }]);
+    setHistory([]);
+    setInput('');
+    clearImage();
+  }, [language]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, typing]);

@@ -83,7 +83,9 @@ export default function Login() {
     } catch (err: any) {
       const code = err.code || '';
       logger.error('Login failed', code);
-      if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+      if (code === 'auth/network-request-failed') {
+        setBanner({ msg: 'No internet — wrong password, or this device has never signed into this account before.', ok: false });
+      } else if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
         setBanner({ msg: 'Incorrect email or password. Please try again.', ok: false });
       } else {
         setBanner({ msg: err.message || t.loginFailed, ok: false });
@@ -115,7 +117,9 @@ export default function Login() {
     } catch (err: any) {
       const code = err.code || '';
       logger.error('Register failed', code);
-      if (code === 'auth/email-already-in-use') {
+      if (code === 'auth/network-request-failed') {
+        setBanner({ msg: 'No internet connection. You need to be online to create an account.', ok: false });
+      } else if (code === 'auth/email-already-in-use') {
         setBanner({ msg: 'This email is already registered. Try signing in instead.', ok: false });
       } else {
         setBanner({ msg: err.message || t.loginRegisterFailed, ok: false });
@@ -329,7 +333,6 @@ export default function Login() {
                   <label className={`block text-xs font-bold uppercase tracking-widest mb-1.5 ${isDark ? 'text-night-muted' : 'text-muted'}`}>{t.loginRole}</label>
                   <select className="input" value={regRole} onChange={e => setRegRole(e.target.value)}>
                     <option value="farmer">🌾 Farmer</option>
-                    <option value="admin">⚙️ Admin</option>
                   </select>
                 </div>
                 <div>

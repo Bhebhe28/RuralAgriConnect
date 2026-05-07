@@ -8,6 +8,11 @@ import * as admin from 'firebase-admin';
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
+// Strip all HTML tags and trim — prevents stored XSS
+const sanitize = (s: string) => s.replace(/<[^>]*>/g, '').replace(/javascript:/gi, '').trim();
+const ALLOWED_CATEGORIES = ['general','disease','weather','market','equipment','soil'];
+const ALLOWED_IMAGE_TYPES = ['image/jpeg','image/png','image/webp','image/gif'];
+
 async function uploadImage(buffer: Buffer, mimetype: string, folder: string): Promise<string> {
   const bucket = admin.storage().bucket();
   const fileName = `${folder}/${Date.now()}-${uuidv4()}`;
@@ -31,16 +36,23 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
 });
 
 router.post('/', authenticate, upload.single('image'), async (req: AuthRequest, res: Response) => {
-  const { title, body, category } = req.body;
+  const title    = sanitize(req.body.title || '');
+  const body     = sanitize(req.body.body  || '');
+  const category = ALLOWED_CATEGORIES.includes(req.body.category) ? req.body.category : 'general';
+
   if (!title || !body) return res.status(400).json({ error: 'title and body are required' });
+  if (title.length > 200)  return res.status(400).json({ error: 'Title too long (max 200 chars)' });
+  if (body.length > 2000)  return res.status(400).json({ error: 'Body too long (max 2000 chars)' });
+
+  if (req.file && !ALLOWED_IMAGE_TYPES.includes(req.file.mimetype))
+    return res.status(400).json({ error: 'Only JPEG, PNG, WebP and GIF images are allowed' });
 
   let imageUrl = null;
   if (req.file) imageUrl = await uploadImage(req.file.buffer, req.file.mimetype, 'community');
 
   const id = uuidv4();
   await setDoc('community_posts', id, {
-    user_id: req.user!.id, title, body,
-    category: category || 'general',
+    user_id: req.user!.id, title, body, category,
     image_url: imageUrl, likes: 0,
     created_at: now(), updated_at: now(),
   });
@@ -48,8 +60,12 @@ router.post('/', authenticate, upload.single('image'), async (req: AuthRequest, 
 });
 
 router.post('/:id/replies', authenticate, upload.single('image'), async (req: AuthRequest, res: Response) => {
-  const { body } = req.body;
+  const body = sanitize(req.body.body || '');
   if (!body) return res.status(400).json({ error: 'body is required' });
+  if (body.length > 1000) return res.status(400).json({ error: 'Reply too long (max 1000 chars)' });
+
+  if (req.file && !ALLOWED_IMAGE_TYPES.includes(req.file.mimetype))
+    return res.status(400).json({ error: 'Only JPEG, PNG, WebP and GIF images are allowed' });
 
   let imageUrl = null;
   if (req.file) imageUrl = await uploadImage(req.file.buffer, req.file.mimetype, 'community');

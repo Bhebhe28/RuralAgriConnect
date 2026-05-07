@@ -44,43 +44,118 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// ── Profile cache ─────────────────────────────────────────────
+const PROFILE_KEY  = 'rac_user_profile';
+const LOCKED_KEY   = 'rac_session_locked';
+const SESSION_KEY  = 'rac_session_active'; // sessionStorage — cleared on app/tab close
+
+function saveProfile(profile: AppUser) {
+  try { localStorage.setItem(PROFILE_KEY, JSON.stringify(profile)); } catch {/**/}
+}
+function loadProfile(): AppUser | null {
+  try { const r = localStorage.getItem(PROFILE_KEY); return r ? JSON.parse(r) : null; } catch { return null; }
+}
+function isLocked(): boolean {
+  return localStorage.getItem(LOCKED_KEY) === '1';
+}
+function setLocked(v: boolean) {
+  try { v ? localStorage.setItem(LOCKED_KEY, '1') : localStorage.removeItem(LOCKED_KEY); } catch {/**/}
+}
+// sessionStorage is cleared when the browser/PWA closes — forces re-login on fresh open
+function sessionActive(): boolean {
+  try { return sessionStorage.getItem(SESSION_KEY) === '1'; } catch { return false; }
+}
+function setSessionActive(v: boolean) {
+  try { v ? sessionStorage.setItem(SESSION_KEY, '1') : sessionStorage.removeItem(SESSION_KEY); } catch {/**/}
+}
+
+// ── Offline credentials — PBKDF2 via Web Crypto ───────────────
+const CREDS_KEY = 'rac_offline_creds';
+
+async function deriveKey(password: string, salt: string): Promise<string> {
+  const enc = new TextEncoder();
+  const keyMat = await crypto.subtle.importKey(
+    'raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveBits']
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: enc.encode(salt), iterations: 100000, hash: 'SHA-256' },
+    keyMat, 256
+  );
+  return btoa(String.fromCharCode(...new Uint8Array(bits)));
+}
+
+async function saveOfflineCreds(email: string, password: string) {
+  try {
+    const salt = crypto.randomUUID();
+    const hash = await deriveKey(password, salt);
+    localStorage.setItem(CREDS_KEY, JSON.stringify({ email, hash, salt }));
+  } catch {/**/}
+}
+
+async function verifyOfflineCreds(email: string, password: string): Promise<boolean> {
+  try {
+    const raw = localStorage.getItem(CREDS_KEY);
+    if (!raw) return false;
+    const { email: stored, hash, salt } = JSON.parse(raw);
+    if (email.toLowerCase() !== stored.toLowerCase()) return false;
+    const computed = await deriveKey(password, salt);
+    return computed === hash;
+  } catch { return false; }
+}
+
+// ════════════════════════════════════════════════════════════════
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser]               = useState<AppUser | null>(null);
+  const [user, setUser]                 = useState<AppUser | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
-  const [loading, setLoading]         = useState(true);
+  const [loading, setLoading]           = useState(true);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
         setFirebaseUser(fbUser);
+
+        // Block auto-restore if:
+        //  - user explicitly logged out (locked), OR
+        //  - app was closed and reopened (no sessionStorage flag = fresh open)
+        if (isLocked() || !sessionActive()) {
+          setLoading(false);
+          return;
+        }
+
+        // Show cached profile instantly
+        const cached = loadProfile();
+        if (cached && cached.id === fbUser.uid) {
+          setUser(cached);
+          setLoading(false);
+        }
+
         try {
           const snap = await getDoc(doc(db, 'users', fbUser.uid));
           if (snap.exists()) {
-            const data = snap.data();
-            setUser({ id: fbUser.uid, ...data } as AppUser);
-            logger.auth('Session restored', `${data.name} (${data.role})`);
+            const profile: AppUser = { id: fbUser.uid, ...snap.data() } as AppUser;
+            setUser(profile);
+            saveProfile(profile);
+            logger.auth('Session restored', `${profile.name} (${profile.role})`);
           } else {
-            setUser({
-              id:    fbUser.uid,
-              name:  fbUser.displayName || fbUser.email?.split('@')[0] || 'User',
+            const profile: AppUser = {
+              id: fbUser.uid,
+              name: fbUser.displayName || fbUser.email?.split('@')[0] || 'User',
               email: fbUser.email || '',
-              role:  'farmer',
-            });
-            logger.auth('Session restored (no profile)', fbUser.email || fbUser.uid);
+              role: 'farmer',
+            };
+            setUser(profile);
+            saveProfile(profile);
           }
-        } catch (err) {
-          logger.error('Failed to load user profile', err);
-          setUser({
-            id:    fbUser.uid,
-            name:  fbUser.displayName || 'User',
-            email: fbUser.email || '',
-            role:  'farmer',
-          });
+        } catch {
+          // Offline — keep cached profile, Firestore will serve from IndexedDB
+          if (!cached || cached.id !== fbUser.uid) {
+            setUser({ id: fbUser.uid, name: fbUser.displayName || 'User', email: fbUser.email || '', role: 'farmer' });
+          }
         }
       } else {
+        // Firebase Auth fully signed out (only happens on explicit real signOut)
         setFirebaseUser(null);
         setUser(null);
-        logger.auth('Session cleared');
       }
       setLoading(false);
     });
@@ -88,46 +163,111 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password);
-    logger.auth('Signed in', email);
+    // Case 1: Firebase Auth session is alive (locked screen after "Sign Out" or fresh app open)
+    if (auth.currentUser) {
+      const currentEmail = auth.currentUser.email?.toLowerCase();
+      if (currentEmail === email.toLowerCase()) {
+        // Verify password locally — works offline
+        const valid = await verifyOfflineCreds(email, password);
+        if (valid) {
+          const cached = loadProfile();
+          if (cached) {
+            setLocked(false);
+            setSessionActive(true);
+            setUser(cached);
+            logger.auth('Unlocked', email);
+            return;
+          }
+        }
+        // Wrong password
+        const err: any = new Error('Wrong password');
+        err.code = 'auth/wrong-password';
+        throw err;
+      }
+      // Different user — sign out the current Firebase session first
+      await signOut(auth);
+    }
+
+    // Case 2: No Firebase session — need internet for first-time login
+    try {
+      // Set session active BEFORE sign-in so onAuthStateChanged finds it set
+      setSessionActive(true);
+      await signInWithEmailAndPassword(auth, email, password);
+      await saveOfflineCreds(email, password);
+      setLocked(false);
+      logger.auth('Signed in', email);
+    } catch (err: any) {
+      setSessionActive(false); // clear optimistic flag on failure
+      if (err.code === 'auth/network-request-failed') {
+        // No internet and no active Firebase session — try offline creds
+        const valid = await verifyOfflineCreds(email, password);
+        if (valid) {
+          const cached = loadProfile();
+          if (cached && cached.email.toLowerCase() === email.toLowerCase()) {
+            setLocked(false);
+            setSessionActive(true);
+            setUser(cached);
+            logger.auth('Signed in offline (no Firebase session)', email);
+            return;
+          }
+        }
+      }
+      throw err;
+    }
   };
 
   const register = async ({ name, email, phone, password, role, region }: RegisterData) => {
+    // Lock BEFORE creating the account so onAuthStateChanged never auto-signs in after registration.
+    // The user must explicitly sign in — this is the security requirement.
+    setLocked(true);
+    setSessionActive(false);
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     await updateProfile(cred.user, { displayName: name });
+    const profile: AppUser = {
+      id: cred.user.uid, name, email,
+      phone: phone || undefined,
+      role: (role as AppUser['role']) || 'farmer',
+      region: region || undefined,
+    };
     await setDoc(doc(db, 'users', cred.user.uid), {
-      name,
-      email,
+      name, email,
       phone:      phone || null,
       role:       role || 'farmer',
       region:     region || null,
       avatar_url: null,
       created_at: new Date().toISOString(),
     });
+    saveProfile(profile);
+    await saveOfflineCreds(email, password);
+    // Do NOT unlock or set session active — user must sign in manually
     logger.auth('Registered', `${name} (${role || 'farmer'})`);
   };
 
   const logout = async () => {
-    logger.auth('Signed out');
-    await signOut(auth);
+    // Lock the session — clears React state but keeps Firebase Auth alive.
+    // Firestore retains a valid auth token so data stays synced offline.
+    // The farmer can re-login offline using the cached password hash.
+    setLocked(true);
+    setSessionActive(false);
+    setUser(null);
+    logger.auth('Session locked');
   };
 
   const refreshUser = async () => {
     const fbUser = auth.currentUser;
     if (!fbUser) return;
     const snap = await getDoc(doc(db, 'users', fbUser.uid));
-    if (snap.exists()) setUser({ id: fbUser.uid, ...snap.data() } as AppUser);
+    if (snap.exists()) {
+      const profile = { id: fbUser.uid, ...snap.data() } as AppUser;
+      setUser(profile);
+      saveProfile(profile);
+    }
   };
 
   return (
     <AuthContext.Provider value={{
-      user,
-      firebaseUser,
-      loading,
-      login,
-      register,
-      logout,
-      refreshUser,
+      user, firebaseUser, loading,
+      login, register, logout, refreshUser,
       isAdmin: user?.role === 'admin',
     }}>
       {children}

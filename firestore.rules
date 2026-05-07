@@ -1,0 +1,129 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── helpers ──────────────────────────────────────────────
+    function isAuth()  { return request.auth != null; }
+    function isMe(uid) { return request.auth.uid == uid; }
+    function isAdmin() {
+      return isAuth() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    function owns(field) {
+      return isAuth() && resource.data[field] == request.auth.uid;
+    }
+
+    // ── users ────────────────────────────────────────────────
+    // Profiles are readable by any logged-in user (needed for community avatars).
+    // No password_hash is stored in Firestore — frontend registers via Firebase Auth.
+    match /users/{userId} {
+      allow read:   if isAuth();
+      allow create: if isAuth() && isMe(userId);
+      allow update: if isAuth() && (isMe(userId) || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // ── advisories — read by all authenticated, write by admin ─
+    match /advisories/{id} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── notifications — read own + broadcast ─────────────────
+    match /notifications/{id} {
+      allow read:   if isAuth() &&
+        (resource.data.user_id == request.auth.uid ||
+         resource.data.user_id == 'broadcast');
+      allow create: if isAuth();
+      allow update: if isAuth() && resource.data.user_id == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    // ── community posts + replies ─────────────────────────────
+    match /community_posts/{postId} {
+      allow read:   if isAuth();
+      allow create: if isAuth();
+      // Owner/admin can edit content; any auth user can increment reply_count or likes
+      allow update: if isAuth() && (
+        owns('user_id') || isAdmin() ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reply_count', 'likes'])
+      );
+      allow delete: if isAuth() && (owns('user_id') || isAdmin());
+
+      match /replies/{replyId} {
+        allow read:   if isAuth();
+        allow create: if isAuth();
+        allow update: if isAuth() && (owns('user_id') || isAdmin());
+        allow delete: if isAuth() && (owns('user_id') || isAdmin());
+      }
+    }
+
+    // ── yield reports — own data; admin sees all ─────────────
+    match /yield_reports/{id} {
+      allow read:   if isAuth() && (owns('farmer_id') || isAdmin());
+      allow create: if isAuth();
+      allow update: if isAuth() && (owns('farmer_id') || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // ── farm fields — own data; admin sees all ───────────────
+    match /farm_fields/{id} {
+      allow read:   if isAuth() && (owns('farmer_id') || isAdmin());
+      allow create: if isAuth();
+      allow update: if isAuth() && (owns('farmer_id') || isAdmin());
+      allow delete: if isAuth() && (owns('farmer_id') || isAdmin());
+    }
+
+    // ── subsidy requests — own data; admin manages ───────────
+    match /subsidy_requests/{id} {
+      allow read:   if isAuth() && (owns('farmer_id') || isAdmin());
+      allow create: if isAuth();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── pest outbreaks — all auth can read; admin writes ─────
+    match /pest_outbreaks/{id} {
+      allow read:   if isAuth();
+      allow create: if isAuth();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── crop scans — own data ────────────────────────────────
+    match /crop_scans/{id} {
+      allow read:   if isAuth() && (owns('user_id') || isAdmin());
+      allow create: if isAuth();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── weather data — all auth can read; admin writes ───────
+    match /weather_data/{id} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── crop calendar — all auth can read; admin writes ──────
+    match /crop_calendar/{id} {
+      allow read:  if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── activity logs — immutable; admin reads ───────────────
+    match /activity_logs/{id} {
+      allow read:          if isAdmin();
+      allow create:        if isAuth();
+      allow update, delete: if false;
+    }
+
+    // ── password resets — server only, no client access ──────
+    match /password_resets/{id} {
+      allow read, write: if false;
+    }
+
+    // ── deny everything else ─────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

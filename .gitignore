@@ -2,9 +2,13 @@ node_modules/
 dist/
 .env
 *.env
+client/.env*
 server/data/
 server/dist/
 client/dist/
 firebase-debug.log
 *.log
 server/serviceAccountKey.json
+.firebase/
+.claude/
+functions/lib/

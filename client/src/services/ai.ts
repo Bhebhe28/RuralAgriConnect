@@ -8,7 +8,13 @@ You specialize in crop management, pest and disease identification, soil health,
 When analyzing images: identify crop diseases, pest damage, or nutrient deficiencies. Give a clear diagnosis with confidence level and specific treatment recommendations using locally available South African products.
 Keep responses practical, concise, and actionable. Use simple language suitable for rural farmers.`;
 
-const MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-flash'];
+const MODELS = [
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-8b',
+  'gemini-2.5-flash-preview-05-20',
+];
 
 function getModel(modelName: string, sysPrompt: string = SYSTEM_PROMPT) {
   const genAI = new GoogleGenerativeAI(API_KEY);
@@ -25,7 +31,6 @@ async function tryModels<T>(fn: (model: ReturnType<typeof getModel>) => Promise<
     } catch (err: any) {
       const msg = `${name}: ${err.message?.slice(0, 300)}`;
       errors.push(msg);
-      console.warn(msg);
       await sleep(1000);
     }
   }
@@ -34,9 +39,9 @@ async function tryModels<T>(fn: (model: ReturnType<typeof getModel>) => Promise<
 
 function buildSystemPrompt(language: string): string {
   let prompt = SYSTEM_PROMPT;
-  if (language === 'zu') prompt += '\n\nCRITICAL: Respond ONLY in isiZulu. Do not use any English unless the farmer uses English.';
-  if (language === 'af') prompt += '\n\nCRITICAL: Respond ONLY in Afrikaans. Moenie Engels gebruik nie tensy die boer Engels gebruik.';
-  if (language === 'st') prompt += '\n\nCRITICAL: Respond ONLY in Sesotho. Se sebelise Senyesemane haeba molemisi a sebelisa Senyesemane.';
+  if (language === 'zu') prompt += '\n\nCRITICAL LANGUAGE RULE: You MUST respond ONLY in isiZulu for every single reply, no exceptions. Never switch to English regardless of what language the farmer writes in. If unsure of an isiZulu term, use the closest equivalent.';
+  if (language === 'af') prompt += '\n\nKRITIESE TAALREËL: Jy MOET altyd en uitsluitlik in Afrikaans antwoord, sonder uitsondering. Moenie oorskakel na Engels nie, maak nie saak in watter taal die boer skryf nie.';
+  if (language === 'st') prompt += '\n\nMOLAO O BOHLOKOA OA PUO: O TLAMEHA ho araba feela ka Sesotho mesebetsing yohle, ho sa natsoe hore ke puo efe eo molemisi a e sebelisang.';
   return prompt;
 }
 
@@ -57,7 +62,6 @@ export async function sendChatMessage(
       return result.response.text();
     }, systemPrompt);
   } catch (err: any) {
-    console.error('AI chat failed:', err?.message);
     // Return fallback but surface quota/network errors clearly
     const msg = (err?.message || '').toLowerCase();
     if (msg.includes('429') || msg.includes('quota')) {
@@ -112,7 +116,7 @@ export async function scanImage(
       disease_name: meta.diseaseName,
       has_disease:  meta.hasDisease,
       severity:     meta.severity,
-    }).catch(console.error);
+    }).catch(() => {});
     return { reply, ...meta };
   } catch {
     return {
@@ -165,11 +169,29 @@ function parseScan(text: string) {
 
 function getFallback(msg: string): string {
   const lower = msg.toLowerCase();
-  if (lower.includes('maize') || lower.includes('corn')) return '🌽 For maize: plant at 75cm row spacing, apply 2:3:2 basal fertilizer at planting, scout for fall armyworm weekly.';
-  if (lower.includes('armyworm') || lower.includes('pest')) return '🐛 For fall armyworm: apply Coragen or Ampligo early morning. Scout weekly and treat when >8 moths/trap/week.';
-  if (lower.includes('tomato') || lower.includes('blight')) return '🍅 For tomato blight: apply copper oxychloride fungicide preventatively. Avoid overhead irrigation.';
-  if (lower.includes('soil') || lower.includes('ph')) return '🌱 Healthy soil pH is 5.5–6.5. Apply agricultural lime if acidic. Test soil every season.';
-  if (lower.includes('water') || lower.includes('irrigat')) return '💧 Water deeply and infrequently. Drip irrigation saves up to 50% water vs flood irrigation.';
-  if (lower.includes('fertilizer') || lower.includes('npk')) return '🧪 Apply 2:3:2 (22) at 200kg/ha for maize. Top-dress with LAN at 6 weeks.';
-  return "🌿 I'm your AI farm advisor. Ask me about crops, pests, diseases, soil health, or weather. You can also upload a photo of a sick plant for instant diagnosis!";
+  if (lower.includes('maize') || lower.includes('corn'))
+    return '🌽 Maize in KZN: plant at 75cm row spacing after first rains (Oct–Nov). Apply 2:3:2 basal fertilizer at planting, top-dress with LAN at 6 weeks. Scout for fall armyworm weekly — treat with Coragen or Ampligo if >8 larvae per 100 plants.';
+  if (lower.includes('armyworm'))
+    return '🐛 Fall armyworm: spray Coragen (chlorantraniliprole) or Ampligo early morning before heat. Scout weekly. Biological option: apply Bacillus thuringiensis (Bt) products. Check inside the whorl for larvae.';
+  if (lower.includes('pest') || lower.includes('insect') || lower.includes('bug'))
+    return '🐛 Common KZN pests: fall armyworm (maize), aphids (vegetables), thrips (tomatoes), red spider mite (dry conditions). Identify the pest first, then apply targeted pesticide. Avoid broad-spectrum sprays that kill beneficial insects.';
+  if (lower.includes('tomato') || lower.includes('blight'))
+    return '🍅 Tomato blight: apply copper oxychloride or mancozeb fungicide every 7–14 days preventatively. Stake plants, avoid overhead irrigation, remove infected leaves. For bacterial wilt, remove and destroy infected plants immediately.';
+  if (lower.includes('season') || lower.includes('plant') || lower.includes('when'))
+    return '📅 KZN planting guide:\n• Maize: Oct–Nov (summer rains)\n• Tomatoes: Aug–Sep (transplant seedlings)\n• Beans: Oct–Nov\n• Butternut/pumpkin: Sep–Oct\n• Spinach/kale: year-round with irrigation\nAlways check your last frost date — KZN coastal areas are frost-free.';
+  if (lower.includes('soil') || lower.includes('ph'))
+    return '🌱 Healthy soil pH is 5.5–6.5 for most crops. Apply agricultural lime (dolomitic) if pH is below 5.5. Test soil every season before planting. Add compost to improve structure — 2–4 tonnes per hectare.';
+  if (lower.includes('water') || lower.includes('irrigat') || lower.includes('drought'))
+    return '💧 Water management: drip irrigation saves 50% water vs flood. Water deeply 2–3× per week rather than lightly every day. Mulch around plants to retain moisture. In drought, prioritise young plants in first 3 weeks after transplant.';
+  if (lower.includes('fertilizer') || lower.includes('npk') || lower.includes('nutrient'))
+    return '🧪 KZN fertilizer guide:\n• Maize: 2:3:2 (22) at 200kg/ha at planting, LAN top-dress at 6 weeks\n• Vegetables: 3:2:1 or similar balanced fertilizer\n• Always test soil first\n• Organic option: chicken manure at 5 tonnes/ha, compost at 3–4 tonnes/ha';
+  if (lower.includes('disease') || lower.includes('sick') || lower.includes('yellow') || lower.includes('spot') || lower.includes('rot'))
+    return '🔬 To diagnose a plant disease: upload a photo using the 📷 camera button for AI diagnosis. Common signs:\n• Yellow leaves = nutrient deficiency or virus\n• Brown spots = fungal disease (apply fungicide)\n• Wilting with green leaves = bacterial wilt or root rot\n• Holes in leaves = pest damage';
+  if (lower.includes('chicken') || lower.includes('poultry') || lower.includes('livestock'))
+    return '🐔 Poultry in KZN: vaccinate against Newcastle disease and Marek\'s disease. Provide 120g feed/bird/day for layers. Biosecurity is key — clean coops weekly, isolate new birds for 2 weeks. Report any mass die-offs to your local vet immediately.';
+  if (lower.includes('weather') || lower.includes('rain') || lower.includes('frost'))
+    return '🌤️ Check the Weather tab for live KZN district forecasts. KZN typically gets summer rainfall (Oct–Mar). Protect crops from hail with shade nets. Frost risk is highest May–Aug in midlands — cover seedlings overnight.';
+  if (lower.includes('hi') || lower.includes('hello') || lower.includes('help'))
+    return '👋 Hello! I can help with:\n• Crop diseases and pest identification\n• What to plant this season in KZN\n• Fertilizer and soil advice\n• Irrigation tips\n• Fall armyworm and other pest control\n\nType your question, or use the 📷 button to upload a photo of a sick plant for AI diagnosis!';
+  return '🌿 I can help with KZN crops, pests, diseases, soil and irrigation. Try asking:\n• "What crops should I plant in KZN?"\n• "How do I treat fall armyworm?"\n• "My maize leaves are yellow — what\'s wrong?"\n\nOr upload a crop photo with 📷 for instant diagnosis.';
 }

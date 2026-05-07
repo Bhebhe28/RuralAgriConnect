@@ -46,15 +46,18 @@ const SEV_ICON: Record<string, string> = {
   critical: '🚨', warning: '⚠️', info: 'ℹ️',
 };
 const SOURCE_LABEL: Record<string, { icon: string; label: string; color: string }> = {
-  scan:   { icon: '🔬', label: 'Crop Scan',     color: 'bg-purple-100 text-purple-800' },
-  farmer: { icon: '👤', label: 'Farmer Report', color: 'bg-green-100 text-green-800'  },
-  admin:  { icon: '🛡️', label: 'Admin Alert',   color: 'bg-blue-100 text-blue-800'    },
-  feed:   { icon: '📡', label: 'Live Feed',      color: 'bg-gray-100 text-gray-700'    },
+  scan:    { icon: '🔬', label: 'Crop Scan',     color: 'bg-purple-100 text-purple-800' },
+  ai_scan: { icon: '🔬', label: 'Crop Scan',     color: 'bg-purple-100 text-purple-800' },
+  farmer:  { icon: '👤', label: 'Farmer Report', color: 'bg-green-100 text-green-800'  },
+  admin:   { icon: '🛡️', label: 'Admin Alert',   color: 'bg-blue-100 text-blue-800'    },
+  feed:    { icon: '📡', label: 'Live Feed',      color: 'bg-gray-100 text-gray-700'    },
 };
 
 const CROPS   = ['Maize', 'Vegetables', 'Legumes', 'Poultry', 'Root Crops', 'Other'];
 const REGIONS = ['eThekwini', 'uMgungundlovu', 'iLembe', 'Zululand', 'uThukela'];
 const REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
+const FEED_SYNC_KEY = 'rac_feed_last_sync';
+const FEED_SYNC_HOURS = 4; // only allow re-sync after 4 hours
 
 async function fetchLiveFeedAlerts(): Promise<any[]> {
   const month = new Date().toLocaleString('en-ZA', { month: 'long', year: 'numeric' });
@@ -97,9 +100,9 @@ export default function OutbreakDashboard() {
 
   const load = async () => {
     try {
-      const [o, s] = await Promise.all([getOutbreaks(), getCropScans()]);
-      setOutbreaks(o as unknown as Outbreak[]);
-      setScans(s as unknown as CropScan[]);
+      const [oRes, sRes] = await Promise.allSettled([getOutbreaks(), getCropScans()]);
+      if (oRes.status === 'fulfilled') setOutbreaks(oRes.value as unknown as Outbreak[]);
+      if (sRes.status === 'fulfilled') setScans(sRes.value as unknown as CropScan[]);
       setLastRefresh(new Date());
     } catch (e) {
       console.error(e);
@@ -135,25 +138,29 @@ export default function OutbreakDashboard() {
   };
 
   const handleLiveSync = async () => {
+    // Rate-limit: only re-sync after FEED_SYNC_HOURS to stop spamming Firestore + notifications
+    const lastSync = localStorage.getItem(FEED_SYNC_KEY);
+    if (lastSync) {
+      const diffHours = (Date.now() - Number(lastSync)) / 3600000;
+      if (diffHours < FEED_SYNC_HOURS) {
+        const minsLeft = Math.ceil((FEED_SYNC_HOURS - diffHours) * 60);
+        setSaved(`✅ Feed is up to date — next sync available in ${minsLeft} min.`);
+        setTimeout(() => setSaved(''), 5000);
+        return;
+      }
+    }
     setSyncing(true);
     setSaved('');
     try {
       const feedItems = await fetchLiveFeedAlerts();
-      const today = new Date().toDateString();
-      const existingKeys = new Set(
-        outbreaks
-          .filter(o => o.source === 'feed' && new Date(o.reported_date).toDateString() === today)
-          .map(o => `${(o.pest_name || '').toLowerCase()}-${(o.region || '').toLowerCase()}`)
-      );
-      const newItems = feedItems.filter((item: any) =>
-        !existingKeys.has(`${(item.pest_name || '').toLowerCase()}-${(item.region || '').toLowerCase()}`)
-      );
-      if (newItems.length > 0) {
-        await Promise.all(newItems.map((item: any) => createOutbreak(item)));
+      if (feedItems.length > 0) {
+        await Promise.all(feedItems.map((item: any) => createOutbreak(item)));
+        localStorage.setItem(FEED_SYNC_KEY, String(Date.now()));
         await load();
-        setSaved(`✅ Live feed synced — ${newItems.length} new alert${newItems.length > 1 ? 's' : ''} added.`);
+        setSaved(`✅ Live feed synced — ${feedItems.length} new alert${feedItems.length > 1 ? 's' : ''} added.`);
       } else {
-        setSaved('✅ Live feed is up to date — no new alerts since last sync.');
+        localStorage.setItem(FEED_SYNC_KEY, String(Date.now()));
+        setSaved('✅ Live feed is up to date — no new alerts.');
       }
       setTimeout(() => setSaved(''), 6000);
     } catch {
@@ -317,7 +324,7 @@ export default function OutbreakDashboard() {
           ) : (
             <div className="space-y-3">
               {filtered.map(o => {
-                const src = SOURCE_LABEL[o.source || 'admin'];
+                const src = SOURCE_LABEL[o.source || 'admin'] ?? SOURCE_LABEL['admin'];
                 const crop = o.crop_affected || o.crop_type || '';
                 const name = o.pest_name || o.description?.slice(0, 50) || 'Unknown';
                 return (

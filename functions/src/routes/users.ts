@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
-import { getDocs, getDoc, updateDoc, deleteDoc } from '../db/firestore';
+import { getDocs, getDoc, setDoc, updateDoc, deleteDoc, now } from '../db/firestore';
+import { v4 as uuidv4 } from 'uuid';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 import multer from 'multer';
 import { getFirestore } from '../db/firestore';
@@ -41,7 +42,20 @@ router.get('/', authenticate, requireAdmin, async (_req: AuthRequest, res: Respo
 });
 
 router.delete('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
+  const target = await getDoc<any>('users', req.params.id);
+  if (!target) return res.status(404).json({ error: 'User not found' });
+
   await deleteDoc('users', req.params.id);
+
+  await setDoc('activity_logs', uuidv4(), {
+    user_id:     req.user!.id,
+    action:      'DELETE_USER',
+    entity_type: 'user',
+    entity_id:   req.params.id,
+    details:     `Admin deleted user: ${target.full_name} (${target.email})`,
+    created_at:  now(),
+  });
+
   res.json({ message: 'User deleted' });
 });
 
