@@ -67,3 +67,4 @@ export const api = functions
   .region('us-central1')
   .runWith({ memory: '512MB', timeoutSeconds: 60 })
   .https.onRequest(app);
+

@@ -5,6 +5,7 @@ import { useOffline } from '../hooks/useOffline';
 import { useLanguage, type Language } from '../context/LanguageContext';
 import { useTheme } from '../context/ThemeContext';
 import ThemeToggle from './ThemeToggle';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 
 const LANGUAGES: { code: Language; flag: string; label: string }[] = [
   { code: 'en', flag: '🇬🇧', label: 'EN' },
@@ -68,6 +69,7 @@ export default function Layout() {
   ];
 
   const { isDark } = useTheme();
+  usePushNotifications(user?.id);
   const handleLogout = () => { logout(); navigate('/'); };
   const currentLang = LANGUAGES.find(l => l.code === language)!;
 

@@ -226,19 +226,39 @@ export async function getCommunityPost(id: string) {
   const repliesSnap = await getDocs(
     query(collection(db, 'community_posts', id, 'replies'), orderBy('created_at', 'asc'))
   );
-  const replies = repliesSnap.docs.map(d => {
+  const rawReplies = repliesSnap.docs.map(d => {
     const r = d.data();
-    return { reply_id: d.id, body: r.body || '', image_url: r.image_url || null, audio_url: r.audio_url || null, created_at: r.created_at || '', author_name: r.author_name || 'Farmer', author_avatar: r.author_avatar || null, user_id: r.user_id || '' };
+    return { reply_id: d.id, body: r.body || '', image_url: r.image_url || null, audio_url: r.audio_url || null, document_url: r.document_url || null, document_name: r.document_name || null, location: r.location || null, created_at: r.created_at || '', author_name: r.author_name || 'Farmer', author_avatar: r.author_avatar || null, user_id: r.user_id || '' };
   });
+
+  // For any message missing an avatar, fetch the user's current avatar from Firestore
+  const missingIds = [...new Set(
+    rawReplies.filter(r => !r.author_avatar && r.user_id).map(r => r.user_id)
+  )];
+  // Also check the post author
+  if (!p.author_avatar && p.user_id && !missingIds.includes(p.user_id)) missingIds.push(p.user_id);
+
+  const avatarMap: Record<string, string | null> = {};
+  await Promise.all(missingIds.map(async (uid) => {
+    const uSnap = await getDoc(doc(db, 'users', uid));
+    if (uSnap.exists()) avatarMap[uid] = uSnap.data().avatar_url || null;
+  }));
+
+  const replies = rawReplies.map(r => ({
+    ...r,
+    author_avatar: r.author_avatar || avatarMap[r.user_id] || null,
+  }));
 
   return {
     post_id: snap_.id, title: p.title, body: p.body, category: p.category,
     image_url: p.image_url || null, likes: p.likes || 0, created_at: p.created_at,
-    author_name: p.author_name, author_avatar: p.author_avatar || null, reply_count: p.reply_count || 0, replies,
+    author_name: p.author_name, user_id: p.user_id || '',
+    author_avatar: p.author_avatar || avatarMap[p.user_id] || null,
+    reply_count: p.reply_count || 0, replies,
   };
 }
 
-export async function createCommunityPost(data: { title: string; body: string; category: string }) {
+export async function createCommunityPost(data: { title: string; body: string; category: string; authorAvatar?: string | null }) {
   const user = auth.currentUser;
   const id = uuid();
   const notifId = uuid();
@@ -255,7 +275,7 @@ export async function createCommunityPost(data: { title: string; body: string; c
     reply_count:  0,
     user_id:      user?.uid || '',
     author_name:  author,
-    author_avatar: null,
+    author_avatar: data.authorAvatar || null,
     created_at:   now,
     updated_at:   now,
   });
@@ -272,7 +292,7 @@ export async function createCommunityPost(data: { title: string; body: string; c
   return { post_id: id };
 }
 
-export async function addReply(postId: string, body: string, mediaUrl?: string | null, mediaType?: 'image' | 'audio' | null) {
+export async function addReply(postId: string, body: string, mediaUrl?: string | null, mediaType?: 'image' | 'audio' | 'document' | 'location' | null, authorAvatar?: string | null, mediaName?: string | null) {
   const user = auth.currentUser;
   const replyId = uuid();
   const notifId = uuid();
@@ -287,12 +307,15 @@ export async function addReply(postId: string, body: string, mediaUrl?: string |
   const batch = writeBatch(db);
   batch.set(doc(db, 'community_posts', postId, 'replies', replyId), {
     body,
-    image_url:    mediaType === 'image' ? (mediaUrl || null) : null,
-    audio_url:    mediaType === 'audio' ? (mediaUrl || null) : null,
-    user_id:      user?.uid || '',
-    author_name:  author,
-    author_avatar: null,
-    created_at:   now,
+    image_url:     mediaType === 'image'    ? (mediaUrl || null) : null,
+    audio_url:     mediaType === 'audio'    ? (mediaUrl || null) : null,
+    document_url:  mediaType === 'document' ? (mediaUrl || null) : null,
+    document_name: mediaType === 'document' ? (mediaName || null) : null,
+    location:      mediaType === 'location' ? (() => { try { return JSON.parse(mediaUrl || 'null'); } catch { return null; } })() : null,
+    user_id:       user?.uid || '',
+    author_name:   author,
+    author_avatar: authorAvatar || null,
+    created_at:    now,
   });
   if (postSnap.exists()) {
     batch.update(postRef, { reply_count: (postSnap.data().reply_count || 0) + 1 });

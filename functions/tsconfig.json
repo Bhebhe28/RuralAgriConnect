@@ -4,6 +4,7 @@
     "noImplicitReturns": false,
     "noUnusedLocals": false,
     "outDir": "lib",
+    "rootDir": "src",
     "sourceMap": true,
     "strict": false,
     "target": "es2020",
