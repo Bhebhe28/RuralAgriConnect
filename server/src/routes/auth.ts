@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 import { getDb, query, run } from '../db/database';
 import { isValidEmail, isStrongPassword } from '../utils';
 import { sendPasswordResetEmail } from '../services/emailService';
@@ -22,7 +23,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
   const token = jwt.sign(
     { id: user.user_id, role: user.role || 'farmer', email: user.email },
-    process.env.JWT_SECRET || 'secret',
+    process.env.JWT_SECRET!,
     { expiresIn: '7d' }
   );
 
@@ -80,7 +81,8 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
   // Always return same message to prevent email enumeration
   if (!users.length) return res.json({ message: 'If that email exists, a reset link has been sent.' });
 
-  const token = uuidv4();
+  // A07: Use cryptographically random token — not UUID (which is not a CSPRNG)
+  const token = crypto.randomBytes(32).toString('hex');
   const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
   // Remove any existing reset tokens for this user

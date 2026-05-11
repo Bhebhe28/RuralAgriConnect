@@ -12,6 +12,8 @@ const router = Router();
 const communityDir = path.join(__dirname, '../../public/community');
 if (!fs.existsSync(communityDir)) fs.mkdirSync(communityDir, { recursive: true });
 
+const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, communityDir),
@@ -21,6 +23,14 @@ const upload = multer({
     },
   }),
   limits: { fileSize: 10 * 1024 * 1024 },
+  // A01: Validate MIME type — reject non-image uploads
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_IMAGE_MIMES.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only JPEG, PNG, and WebP images are allowed'));
+    }
+  },
 });
 
 router.get('/', authenticate, async (_req: AuthRequest, res: Response) => {

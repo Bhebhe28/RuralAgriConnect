@@ -42,7 +42,23 @@ async function bootstrap() {
   setInterval(() => syncOutbreaksAndNotify().catch(console.error), 24 * 60 * 60 * 1000);
 
   // Middleware
-  app.use(helmet({ contentSecurityPolicy: false }));
+  // A05: Enable helmet with a proper Content Security Policy instead of disabling it
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc:     ["'self'"],
+        scriptSrc:      ["'self'"],
+        styleSrc:       ["'self'", "'unsafe-inline'"], // unsafe-inline needed for Tailwind inline styles
+        imgSrc:         ["'self'", 'data:', 'blob:', 'https:'],
+        connectSrc:     ["'self'", 'https://api.openweathermap.org', 'https://generativelanguage.googleapis.com', 'https://*.firebaseio.com', 'https://*.googleapis.com'],
+        fontSrc:        ["'self'", 'https:', 'data:'],
+        objectSrc:      ["'none'"],
+        frameAncestors: ["'none'"],
+        upgradeInsecureRequests: [],
+      },
+    },
+    crossOriginEmbedderPolicy: false, // Required for Firebase Auth popup flows
+  }));
 
   const ALLOWED_ORIGINS = [
     'http://localhost:5173',
@@ -54,11 +70,14 @@ async function bootstrap() {
 
   app.use(cors({
     origin: (origin, callback) => {
-      if (!origin || ALLOWED_ORIGINS.includes(origin) || origin.includes('localhost')) {
-        callback(null, true);
-      } else {
-        callback(new Error(`CORS blocked: ${origin}`));
+      // A05: In production, only allow explicitly listed origins — no wildcard localhost
+      if (!origin) return callback(null, true); // allow server-to-server / curl
+      if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+      // Allow localhost only in development
+      if (process.env.NODE_ENV !== 'production' && origin.includes('localhost')) {
+        return callback(null, true);
       }
+      callback(new Error(`CORS blocked: ${origin}`));
     },
     credentials: true,
   }));
@@ -75,6 +94,21 @@ async function bootstrap() {
     standardHeaders: true, legacyHeaders: false,
   });
 
+  // A04: Rate limit AI endpoints — prevents quota exhaustion by a single user
+  const chatLimiter = rateLimit({
+    windowMs: 60 * 1000, max: 20,
+    message: { error: 'Too many AI requests. Please wait a minute before trying again.' },
+    standardHeaders: true, legacyHeaders: false,
+    keyGenerator: (req: any) => req.user?.id || req.ip, // per-user limit after auth
+  });
+
+  // A04: Rate limit community writes — prevents spam
+  const communityWriteLimiter = rateLimit({
+    windowMs: 60 * 1000, max: 10,
+    message: { error: 'Too many posts. Please slow down.' },
+    standardHeaders: true, legacyHeaders: false,
+  });
+
   // Routes
   app.use('/api/auth',          authLimiter, authRoutes);
   app.use('/api/advisories',    advisoryRoutes);
@@ -82,17 +116,18 @@ async function bootstrap() {
   app.use('/api/users',         userRoutes);
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/sync',          syncRoutes);
-  app.use('/api/chat',          chatRoutes);
+  app.use('/api/chat',          chatLimiter, chatRoutes);
   app.use('/api/outbreaks',     outbreakRoutes);
-  app.use('/api/community',     communityRoutes);
+  app.use('/api/community',     communityWriteLimiter, communityRoutes);
   app.use('/api/yields',        yieldRoutes);
   app.use('/api/subsidies',     subsidyRoutes);
   app.use('/api/calendar',      calendarRoutes);
   app.use('/api/fields',        fieldRoutes);
   app.use('/api/analytics',     analyticsRoutes);
 
+  // A05: Health endpoint — no internal implementation details exposed
   app.get('/api/health', (_, res) =>
-    res.json({ status: 'ok', db: 'sqlite', timestamp: new Date().toISOString() })
+    res.json({ status: 'ok', timestamp: new Date().toISOString() })
   );
 
   app.listen(PORT, '0.0.0.0', () => {
@@ -132,7 +167,7 @@ async function seedIfEmpty() {
      'Ideal conditions for planting tomatoes, spinach, and cabbage.',
      'Vegetables', 'KwaZulu-Natal — uMgungundlovu', 'info', adminId, now, now]);
 
-  console.log('✅ Seed complete — admin@farm.co.za / Admin@123');
+  console.log('✅ Seed complete — default accounts created (see server/.env.example for credentials)');
 }
 
 bootstrap().catch((e) => {

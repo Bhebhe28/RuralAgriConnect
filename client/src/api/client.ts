@@ -25,11 +25,14 @@ api.interceptors.response.use(
     // If offline and it's a write operation, queue it for later
     if (!navigator.onLine && err.config?.method !== 'get') {
       const queue = JSON.parse(localStorage.getItem('offlineQueue') || '[]');
+      // A08: Strip Authorization header — token is re-attached on replay via interceptor
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { Authorization, authorization, ...safeHeaders } = err.config.headers || {};
       queue.push({
-        url:     err.config.url,
-        method:  err.config.method,
-        data:    err.config.data,
-        headers: err.config.headers,
+        url:      err.config.url,
+        method:   err.config.method,
+        data:     err.config.data,
+        headers:  safeHeaders,
         queuedAt: new Date().toISOString(),
       });
       localStorage.setItem('offlineQueue', JSON.stringify(queue));
