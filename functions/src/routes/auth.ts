@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 import { getDocs, getDoc, setDoc, updateDoc, deleteDoc, now } from '../db/firestore';
 import { isValidEmail, isStrongPassword } from '../utils';
 import { sendPasswordResetEmail } from '../services/emailService';
@@ -11,6 +12,8 @@ const router = Router();
 router.post('/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+  if (typeof email !== 'string' || email.length > 254) return res.status(400).json({ error: 'Invalid email' });
+  if (typeof password !== 'string' || password.length > 128) return res.status(400).json({ error: 'Invalid password' });
 
   const users = await getDocs<any>('users', [['email', '==', email]]);
   const user = users[0];
@@ -49,18 +52,26 @@ router.post('/login', async (req: Request, res: Response) => {
 });
 
 router.post('/register', async (req: Request, res: Response) => {
-  const { name, email, phone, password, role, region } = req.body;
+  const { name, email, phone, password, region } = req.body;
   if (!name || !email || !password)
     return res.status(400).json({ error: 'Name, email and password required' });
+  if (typeof name !== 'string' || name.trim().length < 2 || name.length > 100)
+    return res.status(400).json({ error: 'Name must be 2–100 characters' });
+  if (typeof email !== 'string' || email.length > 254)
+    return res.status(400).json({ error: 'Invalid email format' });
   if (!isValidEmail(email))
     return res.status(400).json({ error: 'Invalid email format' });
+  if (typeof password !== 'string' || password.length > 128)
+    return res.status(400).json({ error: 'Invalid password length' });
   if (!isStrongPassword(password))
     return res.status(400).json({ error: 'Password must be 8+ characters with uppercase, lowercase and a number' });
+  if (phone && (typeof phone !== 'string' || phone.length > 20))
+    return res.status(400).json({ error: 'Invalid phone number' });
 
   const existing = await getDocs('users', [['email', '==', email]]);
   if (existing.length > 0) return res.status(409).json({ error: 'Email already registered' });
 
-  const roleName = role || 'farmer';
+  const roleName = 'farmer'; // Always 'farmer'; admins are assigned only via admin panel
   const userId = uuidv4();
 
   await setDoc('users', userId, {
@@ -91,11 +102,13 @@ router.post('/register', async (req: Request, res: Response) => {
 router.post('/forgot-password', async (req: Request, res: Response) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email required' });
+  if (typeof email !== 'string' || email.length > 254) return res.status(400).json({ error: 'Invalid email' });
 
   const users = await getDocs<any>('users', [['email', '==', email]]);
   if (!users.length) return res.json({ message: 'If that email exists, a reset link has been sent.' });
 
-  const token = uuidv4();
+  // A07: Use cryptographically random token — not UUID (which is not a CSPRNG)
+  const token = crypto.randomBytes(32).toString('hex');
   const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
   await setDoc('password_resets', token, {

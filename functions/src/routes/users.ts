@@ -7,7 +7,19 @@ import { getFirestore } from '../db/firestore';
 import * as admin from 'firebase-admin';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  // A01: Validate MIME type — reject non-image uploads
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_IMAGE_MIMES.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only JPEG, PNG, and WebP images are allowed'));
+    }
+  },
+});
 
 router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
   const user = await getDoc<any>('users', req.user!.id);

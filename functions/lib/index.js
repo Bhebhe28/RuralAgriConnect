@@ -61,37 +61,78 @@ const subsidies_1 = __importDefault(require("./routes/subsidies"));
 const calendar_1 = __importDefault(require("./routes/calendar"));
 const fields_1 = __importDefault(require("./routes/fields"));
 const analytics_1 = __importDefault(require("./routes/analytics"));
+const securityLog_1 = __importDefault(require("./routes/securityLog"));
 const app = (0, express_1.default)();
-app.use((0, helmet_1.default)({ contentSecurityPolicy: false }));
-app.use((0, cors_1.default)({
-    origin: [
-        'http://localhost:5173',
-        'http://localhost:4173',
-        'https://ruralagriconnect-15c7c.web.app',
-        'https://ruralagriconnect-15c7c.firebaseapp.com',
-    ],
-    credentials: true,
+// A04: Enable CSP via helmet instead of using defaults
+app.use((0, helmet_1.default)({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+            connectSrc: ["'self'", 'https://*.googleapis.com', 'https://*.firebaseio.com', 'https://api.open-meteo.com'],
+            fontSrc: ["'self'", 'https:', 'data:'],
+            objectSrc: ["'none'"],
+            frameAncestors: ["'none'"],
+        },
+    },
+    crossOriginEmbedderPolicy: false,
 }));
+const PROD_ORIGINS = [
+    'https://ruralagriconnect-15c7c.web.app',
+    'https://ruralagriconnect-15c7c.firebaseapp.com',
+];
+// A05: Localhost only allowed in development — never in production
+const ALLOWED_ORIGINS = process.env.NODE_ENV === 'production'
+    ? PROD_ORIGINS
+    : [...PROD_ORIGINS, 'http://localhost:5173', 'http://localhost:4173'];
+app.use((0, cors_1.default)({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(express_1.default.json({ limit: '10mb' }));
+// A07: Auth rate limiter — 10 attempts per 15 min
 const authLimiter = (0, express_rate_limit_1.default)({
     windowMs: 15 * 60 * 1000, max: 10,
     message: { error: 'Too many attempts, please try again in 15 minutes.' },
+    standardHeaders: true, legacyHeaders: false,
 });
+// A07: Stricter limit for password reset — prevents email bombing
+const resetLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 60 * 60 * 1000, max: 5,
+    message: { error: 'Too many reset requests, please try again in 1 hour.' },
+    standardHeaders: true, legacyHeaders: false,
+});
+// A04: Rate limit AI endpoints — prevents Gemini quota exhaustion per user
+const chatLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 60 * 1000, max: 20,
+    message: { error: 'Too many AI requests. Please wait a minute before trying again.' },
+    standardHeaders: true, legacyHeaders: false,
+    keyGenerator: (req) => req.user?.id || req.ip,
+});
+// A04: Rate limit community writes — prevents spam
+const communityWriteLimiter = (0, express_rate_limit_1.default)({
+    windowMs: 60 * 1000, max: 10,
+    message: { error: 'Too many posts. Please slow down.' },
+    standardHeaders: true, legacyHeaders: false,
+});
+app.use('/auth/forgot-password', resetLimiter);
+app.use('/auth/reset-password', resetLimiter);
 app.use('/auth', authLimiter, auth_1.default);
 app.use('/advisories', advisories_1.default);
 app.use('/weather', weather_1.default);
 app.use('/users', users_1.default);
 app.use('/notifications', notifications_1.default);
 app.use('/sync', sync_1.default);
-app.use('/chat', chat_1.default);
+app.use('/chat', chatLimiter, chat_1.default);
 app.use('/outbreaks', outbreaks_1.default);
-app.use('/community', community_1.default);
+app.use('/community', communityWriteLimiter, community_1.default);
 app.use('/yields', yields_1.default);
 app.use('/subsidies', subsidies_1.default);
 app.use('/calendar', calendar_1.default);
 app.use('/fields', fields_1.default);
 app.use('/analytics', analytics_1.default);
-app.get('/health', (_, res) => res.json({ status: 'ok', db: 'firestore', timestamp: new Date().toISOString() }));
+app.use('/security-log', securityLog_1.default);
+// A05: Health endpoint — no internal implementation details exposed
+app.get('/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 exports.api = functions
     .region('us-central1')
     .runWith({ memory: '512MB', timeoutSeconds: 60 })
