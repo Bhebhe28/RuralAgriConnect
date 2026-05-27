@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { getCommunityPosts, getCommunityPost, createCommunityPost, addReply, likePost, createChannel, deletePost, deleteReply, muteUserInChannel, unmuteUserInChannel } from '../services/firestore';
+import { getCommunityPost, createCommunityPost, addReply, likePost, createChannel, deletePost, deleteReply, muteUserInChannel, unmuteUserInChannel, subscribeToPostReplies, subscribeToCommunityPosts } from '../services/firestore';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
@@ -187,13 +187,14 @@ export default function Community() {
   const [newCh, setNewCh]               = useState({ name: '', emoji: '💬', description: '' });
   const [manageOpen, setManageOpen]     = useState(false);
 
-  const endRef    = useRef<HTMLDivElement>(null);
-  const fileRef   = useRef<HTMLInputElement>(null);
-  const camRef    = useRef<HTMLInputElement>(null);
-  const docRef    = useRef<HTMLInputElement>(null);
-  const mrRef     = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const timerRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const endRef      = useRef<HTMLDivElement>(null);
+  const fileRef     = useRef<HTMLInputElement>(null);
+  const camRef      = useRef<HTMLInputElement>(null);
+  const docRef      = useRef<HTMLInputElement>(null);
+  const mrRef       = useRef<MediaRecorder | null>(null);
+  const chunksRef   = useRef<Blob[]>([]);
+  const timerRef    = useRef<ReturnType<typeof setInterval> | null>(null);
+  const replyUnsubRef = useRef<(() => void) | null>(null);
 
   const bg      = isDark ? '#0b141a' : '#efeae2';
   const header  = isDark ? '#202c33' : '#128C7E';
@@ -204,11 +205,14 @@ export default function Community() {
   const mutedCol= isDark ? '#8696a0' : '#667781';
   const divider = isDark ? '#313d44' : '#e0e0e0';
 
-  const load = useCallback(() => {
-    getCommunityPosts().then(d => { setPosts(d as Post[]); setLoading(false); }).catch(() => setLoading(false));
+  // Real-time posts list
+  useEffect(() => {
+    const unsub = subscribeToCommunityPosts((data) => {
+      setPosts(data as Post[]);
+      setLoading(false);
+    });
+    return () => unsub();
   }, []);
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => { if (selected) endRef.current?.scrollIntoView({ behavior:'smooth' }); }, [selected]);
 
   // Sync readPosts with localStorage whenever posts list updates
   useEffect(() => {
@@ -217,17 +221,30 @@ export default function Community() {
     setReadPosts(new Set(posts.filter(p => (stored[p.post_id] ?? -1) >= p.reply_count).map(p => p.post_id)));
   }, [posts]);
 
+  useEffect(() => { if (selected) endRef.current?.scrollIntoView({ behavior:'smooth' }); }, [selected?.replies]);
+
+  // Open a post: fetch metadata once, then subscribe to replies in real-time
   const openPost = useCallback(async (id: string) => {
+    // Tear down previous listener
+    if (replyUnsubRef.current) { replyUnsubRef.current(); replyUnsubRef.current = null; }
     try {
       const d = await getCommunityPost(id);
       const detail = d as PostDetail;
       setSelected(detail);
       setReadPosts(prev => { const s = new Set(prev); s.add(id); return s; });
       markRead(id, detail.reply_count);
+      // Subscribe to live replies — updates arrive without re-fetching
+      replyUnsubRef.current = subscribeToPostReplies(id, (replies) => {
+        setSelected(prev => prev ? { ...prev, replies: replies as Reply[], reply_count: replies.length } : prev);
+        markRead(id, replies.length);
+      });
     } catch (err) {
       console.error('Failed to open post:', err);
     }
   }, []);
+
+  // Clean up reply listener when component unmounts
+  useEffect(() => () => { replyUnsubRef.current?.(); }, []);
 
   // ── Send ──────────────────────────────────────────────────────
   const handleSend = async () => {
@@ -249,7 +266,6 @@ export default function Community() {
       // Pass title + authorId so addReply doesn't need to pre-fetch the post
       await addReply(selected.post_id, txt, pm?.url, pm?.type, user?.avatar_url, pm?.name, selected.title, selected.user_id);
       setMsgText(''); setPendingMedia(null);
-      await openPost(selected.post_id);
     } catch (err: any) {
       setSendError(navigator.onLine ? 'Failed to send. Please try again.' : 'No internet — message will send when back online.');
       console.error('Send failed:', err);
@@ -322,7 +338,7 @@ export default function Community() {
     e.preventDefault(); if (submitting) return; setSubmitting(true);
     try {
       await createCommunityPost({ ...newPost, authorAvatar: user?.avatar_url });
-      setNewPostOpen(false); setNewPost({ title:'', body:'', category:'general' }); load();
+      setNewPostOpen(false); setNewPost({ title:'', body:'', category:'general' });
     } finally { setSubmitting(false); }
   };
 
@@ -331,7 +347,7 @@ export default function Community() {
     if (!selected) return;
     if (!window.confirm('Delete this message?')) return;
     try {
-      if (isRoot) { await deletePost(selected.post_id); setSelected(null); load(); }
+      if (isRoot) { await deletePost(selected.post_id); setSelected(null); replyUnsubRef.current?.(); replyUnsubRef.current = null; }
       else { await deleteReply(selected.post_id, replyId); await openPost(selected.post_id); }
     } catch { /* silent */ }
   };
@@ -357,7 +373,6 @@ export default function Community() {
       await createChannel(newCh.name.trim(), newCh.emoji, newCh.description.trim());
       setCreateChOpen(false);
       setNewCh({ name: '', emoji: '💬', description: '' });
-      load();
     } finally { setSubmitting(false); }
   };
 
@@ -486,7 +501,7 @@ export default function Community() {
                   ))}
                 </div>
               )}
-              <button onClick={async () => { if (window.confirm('Delete this group and all its messages?')) { await deletePost(selected.post_id); setSelected(null); setManageOpen(false); load(); } }}
+              <button onClick={async () => { if (window.confirm('Delete this group and all its messages?')) { await deletePost(selected.post_id); setSelected(null); setManageOpen(false); replyUnsubRef.current?.(); replyUnsubRef.current = null; } }}
                 className="w-full py-2 rounded-xl text-white text-sm font-semibold" style={{ background:'#e53935' }}>
                 🗑️ Delete Group
               </button>
@@ -635,7 +650,7 @@ export default function Community() {
                     ⚙️
                   </button>
                 )}
-                <button onClick={() => likePost(selected.post_id).then(load)}
+                <button onClick={() => likePost(selected.post_id)}
                   className="flex items-center gap-1 px-3 py-1 rounded-full hover:bg-white/10 text-white/80 text-sm">
                   ❤️ {selected.likes}
                 </button>

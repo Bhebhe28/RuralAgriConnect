@@ -1,7 +1,7 @@
 import {
   collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc,
   query, where, orderBy, limit, serverTimestamp, writeBatch,
-  increment, arrayUnion, arrayRemove,
+  increment, arrayUnion, arrayRemove, onSnapshot,
   type DocumentData,
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
@@ -266,6 +266,60 @@ export async function getCommunityPost(id: string) {
     muted_users:   p.muted_users   || [],
     replies,
   };
+}
+
+// Real-time listener for replies in a post — returns unsubscribe fn
+export function subscribeToPostReplies(
+  postId: string,
+  onUpdate: (replies: DocumentData[]) => void
+): () => void {
+  const q = query(
+    collection(db, 'community_posts', postId, 'replies'),
+    orderBy('created_at', 'asc')
+  );
+  return onSnapshot(q, (snap) => {
+    onUpdate(snap.docs.map(d => ({
+      reply_id:      d.id,
+      body:          d.data().body          || '',
+      image_url:     d.data().image_url     || null,
+      audio_url:     d.data().audio_url     || null,
+      document_url:  d.data().document_url  || null,
+      document_name: d.data().document_name || null,
+      location:      d.data().location      || null,
+      created_at:    d.data().created_at    || '',
+      author_name:   d.data().author_name   || 'Farmer',
+      author_avatar: d.data().author_avatar || null,
+      user_id:       d.data().user_id       || '',
+    })));
+  });
+}
+
+// Real-time listener for the posts list — returns unsubscribe fn
+export function subscribeToCommunityPosts(
+  onUpdate: (posts: DocumentData[]) => void
+): () => void {
+  const q = query(collection(db, 'community_posts'), orderBy('created_at', 'desc'), limit(50));
+  return onSnapshot(q, (snap) => {
+    onUpdate(snap.docs.map(d => {
+      const p = d.data();
+      return {
+        post_id:       d.id,
+        title:         p.title         || '',
+        body:          p.body          || '',
+        category:      p.category      || 'general',
+        image_url:     p.image_url     || null,
+        likes:         p.likes         || 0,
+        created_at:    p.created_at    || '',
+        author_name:   p.author_name   || 'Farmer',
+        author_avatar: p.author_avatar || null,
+        reply_count:   p.reply_count   || 0,
+        user_id:       p.user_id       || '',
+        is_channel:    p.is_channel    || false,
+        channel_emoji: p.channel_emoji || null,
+        muted_users:   p.muted_users   || [],
+      };
+    }));
+  });
 }
 
 export async function createCommunityPost(data: { title: string; body: string; category: string; authorAvatar?: string | null }) {
