@@ -32,3 +32,21 @@ export function isValidImageType(mimetype: string): boolean {
 
 /** Max upload size: 5 MB */
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+// A10: SSRF protection — only these hostnames may be used in server-side HTTP requests.
+// Any code that fetches a user-supplied or dynamically built URL must call isAllowedUrl() first.
+const SSRF_ALLOWED_HOSTS = new Set([
+  'api.open-meteo.com',
+  'geocoding-api.open-meteo.com',
+  'generativelanguage.googleapis.com',
+  'fcm.googleapis.com',
+  'firestore.googleapis.com',
+  'identitytoolkit.googleapis.com',
+]);
+
+export function isAllowedUrl(url: string): boolean {
+  try {
+    const { hostname, protocol } = new URL(url);
+    return protocol === 'https:' && SSRF_ALLOWED_HOSTS.has(hostname);
+  } catch { return false; }
+}

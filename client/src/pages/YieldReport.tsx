@@ -51,19 +51,27 @@ export default function YieldReport() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const area = parseFloat(form.area_hectares);
+    const yieldKg = parseFloat(form.yield_kg);
+    if (isNaN(area) || area < 0.1 || area > 50000)
+      return setSaved('❌ Area must be between 0.1 and 50 000 hectares.');
+    if (isNaN(yieldKg) || yieldKg < 1 || yieldKg > 10000000)
+      return setSaved('❌ Yield must be between 1 and 10 000 000 kg.');
+    if (form.notes && form.notes.trim().length > 1000)
+      return setSaved('❌ Notes must not exceed 1 000 characters.');
     try {
       await createYieldReport({
         ...form,
-        area_hectares: parseFloat(form.area_hectares),
-        yield_kg: parseFloat(form.yield_kg),
+        area_hectares: area,
+        yield_kg: yieldKg,
       });
       setSaved('✅ Yield report submitted successfully!');
       setShowForm(false);
       setForm({ season: '2025/26', crop_type: 'Maize', region: 'KwaZulu-Natal — eThekwini', area_hectares: '', yield_kg: '', quality: 'good', notes: '' });
       load();
       setTimeout(() => setSaved(''), 4000);
-    } catch (err: any) {
-      setSaved('❌ ' + (err.message || 'Failed to submit'));
+    } catch {
+      setSaved('❌ Failed to submit. Please try again.');
     }
   };
 
@@ -128,12 +136,12 @@ export default function YieldReport() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1.5">Area (Hectares)</label>
-                <input className="input" type="number" step="0.1" min="0.1" placeholder="e.g. 2.5"
+                <input className="input" type="number" step="0.1" min="0.1" max="50000" placeholder="e.g. 2.5"
                   value={form.area_hectares} onChange={e => setForm(f => ({ ...f, area_hectares: e.target.value }))} required />
               </div>
               <div>
                 <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1.5">Total Yield (kg)</label>
-                <input className="input" type="number" step="1" min="1" placeholder="e.g. 4500"
+                <input className="input" type="number" step="1" min="1" max="10000000" placeholder="e.g. 4500"
                   value={form.yield_kg} onChange={e => setForm(f => ({ ...f, yield_kg: e.target.value }))} required />
               </div>
             </div>
@@ -154,7 +162,7 @@ export default function YieldReport() {
             <div>
               <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1.5">Notes (optional)</label>
               <textarea className="input resize-none" rows={2} placeholder="Any challenges, observations, or comments…"
-                value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+                maxLength={1000} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
             </div>
             <button type="submit" className="btn-primary w-full py-3">Submit Yield Report</button>
           </form>

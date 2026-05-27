@@ -111,6 +111,6 @@ app.get('/health', (_, res) =>
 
 export const api = functions
   .region('us-central1')
-  .runWith({ memory: '512MB', timeoutSeconds: 60 })
+  .runWith({ memory: '512MB', timeoutSeconds: 60, secrets: ['GEMINI_API_KEY'] })
   .https.onRequest(app);
 

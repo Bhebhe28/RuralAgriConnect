@@ -1,10 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { isValidEmail, isStrongPassword, isValidPhoneZA } from '../utils';
 import { useTheme } from '../context/ThemeContext';
 import { logger } from '../utils/logger';
+
+// ── Account lockout helpers (PCI DSS 8.1.6 — max 3 failed attempts) ──────────
+const MAX_ATTEMPTS = 3;
+const lockoutKey = (email: string) => `rac_lo_${encodeURIComponent(email.toLowerCase())}`;
+
+function getLockout(email: string) {
+  try { return JSON.parse(localStorage.getItem(lockoutKey(email)) || '{"count":0,"locked":false}') as { count: number; locked: boolean }; }
+  catch { return { count: 0, locked: false }; }
+}
+function saveLockout(email: string, data: { count: number; locked: boolean }) {
+  try { localStorage.setItem(lockoutKey(email), JSON.stringify(data)); } catch {}
+}
+export function clearLoginLockout(email: string) {
+  try { localStorage.removeItem(lockoutKey(email)); } catch {}
+}
 
 const REGIONS = ['eThekwini','uMgungundlovu','iLembe','Zululand','uThukela'];
 
@@ -33,6 +48,8 @@ export default function Login() {
   const [tab, setTab] = useState<'login' | 'register'>('login');
   const [banner, setBanner] = useState<{ msg: string; ok: boolean } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [failCount, setFailCount] = useState(0);
+  const [isLocked, setIsLocked] = useState(false);
 
   // Login fields
   const [email, setEmail]       = useState('');
@@ -54,6 +71,16 @@ export default function Login() {
   const [tRPwd,   setTRPwd]   = useState(false);
   const [tRPwd2,  setTRPwd2]  = useState(false);
 
+  // Sync lockout state whenever a valid email is typed
+  useEffect(() => {
+    if (!isValidEmail(email)) return;
+    const lo = getLockout(email);
+    setFailCount(lo.count);
+    setIsLocked(lo.locked);
+    if (lo.locked) setBanner({ msg: '🔒 Account locked after 3 failed attempts. Reset your password to regain access.', ok: false });
+    else setBanner(null);
+  }, [email]);
+
   // ── derived field states ──────────────────────────────────────
   const emailState:  FieldState = !tEmail  ? 'idle' : isValidEmail(email)    ? 'valid' : 'error';
   const pwdState:    FieldState = !tPwd    ? 'idle' : password.length > 0    ? 'valid' : 'error';
@@ -74,21 +101,45 @@ export default function Login() {
     if (!isValidEmail(email)) { setBanner({ msg: 'Please enter a valid email address.', ok: false }); return; }
     if (!password)             { setBanner({ msg: 'Please enter your password.', ok: false }); return; }
 
+    // ── Lockout check ─────────────────────────────────────────
+    const lo = getLockout(email);
+    if (lo.locked) {
+      setIsLocked(true);
+      setBanner({ msg: '🔒 Account locked after 3 failed attempts. Reset your password to regain access.', ok: false });
+      return;
+    }
+
     setLoading(true);
     logger.auth('Login attempt', email);
     try {
       await login(email, password);
+      clearLoginLockout(email);
+      setFailCount(0); setIsLocked(false);
       logger.auth('Login success', email);
       navigate('/dashboard');
     } catch (err: any) {
       const code = err.code || '';
       logger.error('Login failed', code);
+
       if (code === 'auth/network-request-failed') {
-        setBanner({ msg: 'No internet — wrong password, or this device has never signed into this account before.', ok: false });
+        setBanner({ msg: 'No internet — check your connection and try again.', ok: false });
       } else if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
-        setBanner({ msg: 'Incorrect email or password. Please try again.', ok: false });
+        const newCount = lo.count + 1;
+        const nowLocked = newCount >= MAX_ATTEMPTS;
+        saveLockout(email, { count: newCount, locked: nowLocked });
+        setFailCount(newCount);
+        setIsLocked(nowLocked);
+        if (nowLocked) {
+          logger.auth('Account locked', email);
+          setBanner({ msg: '🔒 Account locked after 3 failed attempts. Reset your password to regain access.', ok: false });
+        } else {
+          const remaining = MAX_ATTEMPTS - newCount;
+          setBanner({ msg: `Incorrect email or password. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining before lockout.`, ok: false });
+        }
+      } else if (code === 'auth/too-many-requests') {
+        setBanner({ msg: 'Too many failed attempts. Please reset your password.', ok: false });
       } else {
-        setBanner({ msg: err.message || t.loginFailed, ok: false });
+        setBanner({ msg: t.loginFailed, ok: false });
       }
     } finally {
       setLoading(false);
@@ -122,7 +173,7 @@ export default function Login() {
       } else if (code === 'auth/email-already-in-use') {
         setBanner({ msg: 'This email is already registered. Try signing in instead.', ok: false });
       } else {
-        setBanner({ msg: err.message || t.loginRegisterFailed, ok: false });
+        setBanner({ msg: t.loginRegisterFailed, ok: false });
       }
     } finally {
       setLoading(false);
@@ -280,12 +331,28 @@ export default function Login() {
                   </button>
                 </div>
               </div>
-              <button type="submit" disabled={loading}
+              <button type="submit" disabled={loading || isLocked}
                 className="btn-primary w-full py-3.5 text-base mt-2 disabled:opacity-60 disabled:cursor-not-allowed">
                 {loading
                   ? <span className="flex items-center justify-center gap-2"><span className="typing-dot"/><span className="typing-dot"/><span className="typing-dot"/></span>
+                  : isLocked ? '🔒 Account Locked'
                   : t.loginBtn}
               </button>
+
+              {isLocked && (
+                <button
+                  type="button"
+                  onClick={() => { clearLoginLockout(email); navigate('/forgot-password'); }}
+                  className="w-full mt-3 py-3 rounded-xl text-sm font-semibold bg-red-600 hover:bg-red-700 text-white transition-colors border-0 cursor-pointer">
+                  Reset Password to Unlock Account
+                </button>
+              )}
+
+              {!isLocked && failCount > 0 && (
+                <p className="text-center text-xs text-amber-600 mt-2">
+                  {failCount}/{MAX_ATTEMPTS} failed attempts — {MAX_ATTEMPTS - failCount} remaining before lockout
+                </p>
+              )}
             </form>
 
           ) : (

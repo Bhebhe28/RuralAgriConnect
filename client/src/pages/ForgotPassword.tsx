@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '../firebase';
+import { clearLoginLockout } from './Login';
 
 export default function ForgotPassword() {
   const navigate = useNavigate();
@@ -16,17 +17,19 @@ export default function ForgotPassword() {
     setLoading(true);
     try {
       await sendPasswordResetEmail(auth, email);
-      setSent(true);
     } catch (err: any) {
       const code = err.code || '';
-      if (code === 'auth/user-not-found' || code === 'auth/invalid-email') {
-        setError(`No account found for ${email}. Please check the email address or register a new account.`);
-      } else {
+      // Silently ignore user-not-found — never reveal whether an email is registered
+      if (code !== 'auth/user-not-found' && code !== 'auth/invalid-email') {
         setError('Something went wrong. Please try again.');
+        setLoading(false);
+        return;
       }
-    } finally {
-      setLoading(false);
     }
+    // Always show success — attacker cannot enumerate valid emails
+    clearLoginLockout(email); // Unlock account so user can sign in after resetting
+    setSent(true);
+    setLoading(false);
   };
 
   return (

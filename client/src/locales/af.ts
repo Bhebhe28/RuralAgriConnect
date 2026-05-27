@@ -103,14 +103,14 @@ const af: Translations = {
 
   // Chatbot
   chatTitle: '🤖 KI Plaasassistent',
-  chatSubtitle: 'Aangedryf deur Google Gemini — gesels of laai \'n gewaspoto op vir onmiddellike diagnose',
-  chatGreeting: "Hallo! Ek is jou KI-plaasadviseur aangedryf deur Gemini. Vra my enigiets — of laai 'n foto van jou gewas/plant op vir onmiddellike siekte- en plaagdiagnose! 📸",
+  chatSubtitle: 'Aangedryf deur RuralAgriConnect — gesels of laai \'n gewaspoto op vir onmiddellike diagnose',
+  chatGreeting: "Hallo! Ek is mnr. Mgabhi se KI-plaasadviseur van RuralAgriConnect. Vra my enigiets — of laai 'n foto van jou gewas/plant op vir onmiddellike siekte- en plaagdiagnose! 📸",
   chatPlaceholder: 'Vra oor gewasse, plae, grond, weer…',
   chatImagePlaceholder: 'Beskryf wat jy wil weet (opsioneel)…',
   chatSend: 'Stuur',
   chatScan: '🔍 Skandeer',
   chatImageReady: '📸 Prent gereed vir analise',
-  chatImageHint: '📸 Laai \'n foto van \'n siek plant, plaagskade of grond op — Gemini sal dit diagnoseer',
+  chatImageHint: '📸 Laai \'n foto van \'n siek plant, plaagskade of grond op — RuralAgriConnect KI sal dit diagnoseer',
   chatOfflineError: 'Kon nie koppel nie. Kontroleer asseblief jou verbinding.',
   chatImageError: 'Jammer, prentanalise het misluk. Probeer asseblief weer.',
   chatSuggestion1: 'Watter gewasse moet ek hierdie seisoen in KZN plant?',

@@ -1,6 +1,7 @@
 import {
   collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc,
   query, where, orderBy, limit, serverTimestamp, writeBatch,
+  increment, arrayUnion, arrayRemove,
   type DocumentData,
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
@@ -201,17 +202,20 @@ export async function getCommunityPosts(category?: string) {
   let posts = snap_.docs.map(d => {
     const p = d.data();
     return {
-      post_id:      d.id,
-      title:        p.title || '',
-      body:         p.body || '',
-      category:     p.category || 'general',
-      image_url:    p.image_url || null,
-      likes:        p.likes || 0,
-      created_at:   p.created_at || '',
-      author_name:  p.author_name || 'Farmer',
+      post_id:       d.id,
+      title:         p.title || '',
+      body:          p.body || '',
+      category:      p.category || 'general',
+      image_url:     p.image_url || null,
+      likes:         p.likes || 0,
+      created_at:    p.created_at || '',
+      author_name:   p.author_name || 'Farmer',
       author_avatar: p.author_avatar || null,
-      reply_count:  p.reply_count || 0,
-      user_id:      p.user_id || '',
+      reply_count:   p.reply_count || 0,
+      user_id:       p.user_id || '',
+      is_channel:    p.is_channel  || false,
+      channel_emoji: p.channel_emoji || null,
+      muted_users:   p.muted_users  || [],
     };
   });
   if (category && category !== 'all') posts = posts.filter(p => p.category === category);
@@ -219,42 +223,48 @@ export async function getCommunityPosts(category?: string) {
 }
 
 export async function getCommunityPost(id: string) {
-  const snap_ = await getDoc(doc(db, 'community_posts', id));
-  if (!snap_.exists()) throw new Error('Post not found');
-  const p = snap_.data();
+  // Fetch post + replies in parallel — was sequential + N avatar reads before (3–10× slower)
+  const [postSnap, repliesSnap] = await Promise.all([
+    getDoc(doc(db, 'community_posts', id)),
+    getDocs(query(collection(db, 'community_posts', id, 'replies'), orderBy('created_at', 'asc'))),
+  ]);
 
-  const repliesSnap = await getDocs(
-    query(collection(db, 'community_posts', id, 'replies'), orderBy('created_at', 'asc'))
-  );
-  const rawReplies = repliesSnap.docs.map(d => {
+  if (!postSnap.exists()) throw new Error('Post not found');
+  const p = postSnap.data();
+
+  const replies = repliesSnap.docs.map(d => {
     const r = d.data();
-    return { reply_id: d.id, body: r.body || '', image_url: r.image_url || null, audio_url: r.audio_url || null, document_url: r.document_url || null, document_name: r.document_name || null, location: r.location || null, created_at: r.created_at || '', author_name: r.author_name || 'Farmer', author_avatar: r.author_avatar || null, user_id: r.user_id || '' };
+    return {
+      reply_id:      d.id,
+      body:          r.body          || '',
+      image_url:     r.image_url     || null,
+      audio_url:     r.audio_url     || null,
+      document_url:  r.document_url  || null,
+      document_name: r.document_name || null,
+      location:      r.location      || null,
+      created_at:    r.created_at    || '',
+      author_name:   r.author_name   || 'Farmer',
+      author_avatar: r.author_avatar || null,
+      user_id:       r.user_id       || '',
+    };
   });
 
-  // For any message missing an avatar, fetch the user's current avatar from Firestore
-  const missingIds = [...new Set(
-    rawReplies.filter(r => !r.author_avatar && r.user_id).map(r => r.user_id)
-  )];
-  // Also check the post author
-  if (!p.author_avatar && p.user_id && !missingIds.includes(p.user_id)) missingIds.push(p.user_id);
-
-  const avatarMap: Record<string, string | null> = {};
-  await Promise.allSettled(missingIds.map(async (uid) => {
-    const uSnap = await getDoc(doc(db, 'users', uid));
-    if (uSnap.exists()) avatarMap[uid] = uSnap.data().avatar_url || null;
-  }));
-
-  const replies = rawReplies.map(r => ({
-    ...r,
-    author_avatar: r.author_avatar || avatarMap[r.user_id] || null,
-  }));
-
   return {
-    post_id: snap_.id, title: p.title, body: p.body, category: p.category,
-    image_url: p.image_url || null, likes: p.likes || 0, created_at: p.created_at,
-    author_name: p.author_name, user_id: p.user_id || '',
-    author_avatar: p.author_avatar || avatarMap[p.user_id] || null,
-    reply_count: p.reply_count || 0, replies,
+    post_id:       postSnap.id,
+    title:         p.title,
+    body:          p.body,
+    category:      p.category,
+    image_url:     p.image_url     || null,
+    likes:         p.likes         || 0,
+    created_at:    p.created_at,
+    author_name:   p.author_name,
+    user_id:       p.user_id       || '',
+    author_avatar: p.author_avatar || null,
+    reply_count:   p.reply_count   || 0,
+    is_channel:    p.is_channel    || false,
+    channel_emoji: p.channel_emoji || null,
+    muted_users:   p.muted_users   || [],
+    replies,
   };
 }
 
@@ -292,17 +302,18 @@ export async function createCommunityPost(data: { title: string; body: string; c
   return { post_id: id };
 }
 
-export async function addReply(postId: string, body: string, mediaUrl?: string | null, mediaType?: 'image' | 'audio' | 'document' | 'location' | null, authorAvatar?: string | null, mediaName?: string | null) {
+// postTitle + postAuthorId passed from client to avoid a pre-read round-trip
+export async function addReply(
+  postId: string, body: string,
+  mediaUrl?: string | null, mediaType?: 'image' | 'audio' | 'document' | 'location' | null,
+  authorAvatar?: string | null, mediaName?: string | null,
+  postTitle?: string, postAuthorId?: string,
+) {
   const user = auth.currentUser;
   const replyId = uuid();
   const notifId = uuid();
   const now = new Date().toISOString();
   const author = user?.displayName || 'A farmer';
-
-  const postRef = doc(db, 'community_posts', postId);
-  const postSnap = await getDoc(postRef);
-  const postTitle = postSnap.exists() ? postSnap.data().title : 'a post';
-  const postAuthorId = postSnap.exists() ? postSnap.data().user_id : null;
 
   const batch = writeBatch(db);
   batch.set(doc(db, 'community_posts', postId, 'replies', replyId), {
@@ -317,15 +328,14 @@ export async function addReply(postId: string, body: string, mediaUrl?: string |
     author_avatar: authorAvatar || null,
     created_at:    now,
   });
-  if (postSnap.exists()) {
-    batch.update(postRef, { reply_count: (postSnap.data().reply_count || 0) + 1 });
-  }
-  // Notify the post author if it's someone else's post
+  // increment avoids a read-modify-write race — reply_count is always accurate
+  batch.update(doc(db, 'community_posts', postId), { reply_count: increment(1) });
+
   const targetUserId = postAuthorId && postAuthorId !== user?.uid ? postAuthorId : 'broadcast';
   batch.set(doc(db, 'notifications', notifId), {
     user_id:    targetUserId,
     type:       'community',
-    title:      `💬 New Reply on "${postTitle}"`,
+    title:      `💬 New Reply on "${postTitle || 'a post'}"`,
     message:    `${author} replied: "${body.slice(0, 100)}"`,
     post_id:    postId,
     read:       0,
@@ -335,11 +345,41 @@ export async function addReply(postId: string, body: string, mediaUrl?: string |
 }
 
 export async function likePost(postId: string) {
-  const postRef = doc(db, 'community_posts', postId);
-  const snap_ = await getDoc(postRef);
-  if (snap_.exists()) {
-    await updateDoc(postRef, { likes: (snap_.data().likes || 0) + 1 });
-  }
+  await updateDoc(doc(db, 'community_posts', postId), { likes: increment(1) });
+}
+
+// ── COMMUNITY ADMIN ───────────────────────────────────────────
+export async function createChannel(name: string, emoji: string, description: string) {
+  const user = auth.currentUser;
+  const id = uuid();
+  const now = new Date().toISOString();
+  await setDoc(doc(db, 'community_posts', id), {
+    title: name, body: description, category: 'general',
+    image_url: null, likes: 0, reply_count: 0,
+    user_id: user?.uid || '', author_name: user?.displayName || 'Admin',
+    author_avatar: null, created_at: now, updated_at: now,
+    is_channel: true, channel_emoji: emoji, muted_users: [],
+  });
+  return id;
+}
+
+export async function deletePost(postId: string) {
+  await deleteDoc(doc(db, 'community_posts', postId));
+}
+
+export async function deleteReply(postId: string, replyId: string) {
+  const batch = writeBatch(db);
+  batch.delete(doc(db, 'community_posts', postId, 'replies', replyId));
+  batch.update(doc(db, 'community_posts', postId), { reply_count: increment(-1) });
+  await batch.commit();
+}
+
+export async function muteUserInChannel(postId: string, userId: string) {
+  await updateDoc(doc(db, 'community_posts', postId), { muted_users: arrayUnion(userId) });
+}
+
+export async function unmuteUserInChannel(postId: string, userId: string) {
+  await updateDoc(doc(db, 'community_posts', postId), { muted_users: arrayRemove(userId) });
 }
 
 // ── YIELD REPORTS ────────────────────────────────────────────
@@ -516,7 +556,7 @@ export async function deleteOutbreak(id: string) {
 }
 
 // ── CROP SCANS ───────────────────────────────────────────────
-export async function saveCropScan(data: { diagnosis: string; crop_type: string; disease_name: string; has_disease: boolean; severity: string }) {
+export async function saveCropScan(data: { diagnosis: string; crop_type: string; disease_name: string; has_disease: boolean; severity: string; image_url?: string; status?: string }) {
   const userId = uid();
   if (!userId) return;
   const userSnap = await getDoc(doc(db, 'users', userId));
@@ -526,9 +566,8 @@ export async function saveCropScan(data: { diagnosis: string; crop_type: string;
   const now = new Date().toISOString();
   const scanId = uuid();
 
-  const batch = writeBatch(db);
-
-  batch.set(doc(db, 'crop_scans', scanId), {
+  // Save scan independently so it always succeeds regardless of outbreak writes
+  await setDoc(doc(db, 'crop_scans', scanId), {
     scan_id:      scanId,
     user_id:      userId,
     user_name:    farmerName,
@@ -538,15 +577,15 @@ export async function saveCropScan(data: { diagnosis: string; crop_type: string;
     disease_name: data.disease_name,
     has_disease:  data.has_disease ? 1 : 0,
     severity:     data.severity,
+    image_url:    data.image_url || null,
+    status:       data.status || 'success',
     created_at:   now,
   });
 
+  // Outbreak + disease alert notification written separately — failure won't affect scan history
   if (data.has_disease && data.disease_name) {
-    const severityEmoji = data.severity === 'critical' ? '🚨' : '⚠️';
     const outbreakId = uuid();
-    const notifId = uuid();
-
-    batch.set(doc(db, 'pest_outbreaks', outbreakId), {
+    setDoc(doc(db, 'pest_outbreaks', outbreakId), {
       outbreak_id:   outbreakId,
       pest_name:     data.disease_name,
       crop_affected: data.crop_type,
@@ -556,19 +595,22 @@ export async function saveCropScan(data: { diagnosis: string; crop_type: string;
       reported_date: now,
       source:        'scan',
       description:   `AI scan detected ${data.disease_name} in ${data.crop_type}. Reported by ${farmerName} in ${region}.`,
-    });
+    }).catch(() => {});
 
-    batch.set(doc(db, 'notifications', notifId), {
-      user_id:    'broadcast',
-      type:       'outbreak',
-      title:      `${severityEmoji} Outbreak Alert: ${data.disease_name}`,
-      message:    `${farmerName} in ${region} detected ${data.disease_name} in ${data.crop_type}. Check your crops for similar symptoms.`,
+    // Personal disease alert notification for this farmer
+    const notifId = uuid();
+    const icon = data.severity === 'critical' ? '🚨' : '⚠️';
+    setDoc(doc(db, 'notifications', notifId), {
+      notif_id:   notifId,
+      user_id:    userId,
+      title:      `${icon} Disease Alert: ${data.disease_name}`,
+      message:    `${data.disease_name} detected in your ${data.crop_type} crop near ${region}. Open Scan History for treatment steps.`,
+      type:       'disease_alert',
+      channel:    'app',
       read:       0,
       created_at: now,
-    });
+    }).catch(() => {});
   }
-
-  await batch.commit();
 }
 
 export async function getCropScans() {

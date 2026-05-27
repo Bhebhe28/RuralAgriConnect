@@ -4,6 +4,7 @@ import { updateMe } from '../services/firestore';
 import { useLanguage } from '../context/LanguageContext';
 import { updateProfile } from 'firebase/auth';
 import { auth } from '../firebase';
+import { isValidName, isValidPhoneZA } from '../utils';
 
 const REGIONS = ['eThekwini','uMgungundlovu','iLembe','Zululand','uThukela'];
 
@@ -60,16 +61,24 @@ export default function Profile() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     setError('');
+    if (!isValidName(name)) {
+      setError('Full name must be 2–100 characters and contain only letters, spaces, hyphens or apostrophes.');
+      return;
+    }
+    if (phone.trim() && !isValidPhoneZA(phone)) {
+      setError('Phone must be a valid SA number — 10 digits starting with 0 (e.g. 082 000 0000) or +27 format.');
+      return;
+    }
+    setLoading(true);
     try {
       await updateMe({ name, phone, region, avatar_url: avatar || undefined });
       if (firebaseUser) await updateProfile(firebaseUser, { displayName: name });
       await refreshUser();
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
-    } catch (err: any) {
-      setError(err.message || 'Failed to save profile.');
+    } catch {
+      setError('Failed to save profile. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -132,11 +141,13 @@ export default function Profile() {
       <form onSubmit={handleSave} className="space-y-4">
         <div>
           <label className="block text-xs font-bold text-muted uppercase tracking-widest mb-1.5">{t.profileFullName}</label>
-          <input className="input" value={name} onChange={e => setName(e.target.value)} required />
+          <input className="input" value={name} onChange={e => setName(e.target.value)}
+            maxLength={100} required />
         </div>
         <div>
           <label className="block text-xs font-bold text-muted uppercase tracking-widest mb-1.5">{t.profilePhone}</label>
-          <input className="input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+27 83 000 0000" />
+          <input className="input" type="tel" value={phone} onChange={e => setPhone(e.target.value)}
+            placeholder="+27 83 000 0000" maxLength={13} />
         </div>
         <div>
           <label className="block text-xs font-bold text-muted uppercase tracking-widest mb-1.5">{t.profileRegion}</label>

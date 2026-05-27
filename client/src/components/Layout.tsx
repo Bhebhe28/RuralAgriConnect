@@ -6,6 +6,7 @@ import { useLanguage, type Language } from '../context/LanguageContext';
 import { useTheme } from '../context/ThemeContext';
 import ThemeToggle from './ThemeToggle';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import { processScanQueue } from '../services/ai';
 
 const LANGUAGES: { code: Language; flag: string; label: string }[] = [
   { code: 'en', flag: '🇬🇧', label: 'EN' },
@@ -15,7 +16,7 @@ const LANGUAGES: { code: Language; flag: string; label: string }[] = [
 ];
 
 export default function Layout() {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, idleWarning } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const isOffline = useOffline();
@@ -36,17 +37,23 @@ export default function Layout() {
   // Close sidebar on route change (mobile)
   useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
 
+  // Process any queued offline scans — on mount (if already online) and when connectivity returns
+  useEffect(() => {
+    if (navigator.onLine) processScanQueue().catch(() => {});
+    const handleOnline = () => { processScanQueue().catch(() => {}); };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, []);
+
   const navItems = [
     { to: '/dashboard',     icon: '🏠', label: t.navDashboard },
     { to: '/advisories',    icon: '📋', label: t.navAdvisories },
     { to: '/weather',       icon: '⛅', label: t.navWeather },
     { to: '/chatbot',       icon: '🤖', label: t.navChatbot },
     { to: '/calendar',      icon: '📅', label: 'Crop Calendar' },
-    { to: '/yields',        icon: '🌾', label: 'Yield Reports' },
-    { to: '/fields',        icon: '🗺️', label: 'My Fields' },
-    { to: '/subsidies',     icon: '📦', label: 'Resource Requests' },
     { to: '/community',     icon: '💬', label: 'Community' },
     { to: '/outbreaks',     icon: '🦠', label: 'Pest Outbreaks' },
+    { to: '/scans',         icon: '🔬', label: 'Scan History' },
     { to: '/notifications', icon: '🔔', label: t.navNotifications },
     { to: '/profile',       icon: '👤', label: t.navProfile },
   ];
@@ -81,6 +88,14 @@ export default function Layout() {
         <div className="fixed top-0 inset-x-0 z-50 bg-amber-500 text-white text-center py-2 text-xs font-semibold flex items-center justify-center gap-2">
           <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
           Offline — showing cached data
+        </div>
+      )}
+
+      {/* ── Idle session warning ── */}
+      {idleWarning && (
+        <div className="fixed top-0 inset-x-0 z-50 bg-red-600 text-white text-center py-2.5 text-xs font-semibold flex items-center justify-center gap-2 animate-fade-in">
+          <span>⏱️</span>
+          <span>Session expiring in 30 seconds due to inactivity — move your mouse or tap to stay logged in</span>
         </div>
       )}
 

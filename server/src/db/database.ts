@@ -36,15 +36,17 @@ export async function initDb() {
     );
 
     CREATE TABLE IF NOT EXISTS users (
-      user_id       TEXT PRIMARY KEY,
-      full_name     TEXT NOT NULL,
-      email         TEXT UNIQUE NOT NULL,
-      phone_number  TEXT,
-      password_hash TEXT NOT NULL,
-      role          TEXT NOT NULL DEFAULT 'farmer',
-      region        TEXT,
-      avatar_url    TEXT,
-      created_at    TEXT DEFAULT (datetime('now'))
+      user_id        TEXT PRIMARY KEY,
+      full_name      TEXT NOT NULL,
+      email          TEXT UNIQUE NOT NULL,
+      phone_number   TEXT,
+      password_hash  TEXT NOT NULL,
+      role           TEXT NOT NULL DEFAULT 'farmer',
+      region         TEXT,
+      avatar_url     TEXT,
+      -- SECURITY FIX A07: Email verification flag
+      email_verified INTEGER NOT NULL DEFAULT 0,
+      created_at     TEXT DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS advisories (
@@ -196,10 +198,35 @@ export async function initDb() {
     );
 
     CREATE TABLE IF NOT EXISTS password_resets (
-      token      TEXT PRIMARY KEY,
+      -- SECURITY FIX A04: token_hash stores SHA-256(token), never plaintext
+      token_hash TEXT PRIMARY KEY,
       user_id    TEXT REFERENCES users(user_id) ON DELETE CASCADE,
       expires_at TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- SECURITY FIX A07: Refresh token rotation — hashed tokens only
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+      token_hash TEXT PRIMARY KEY,
+      user_id    TEXT REFERENCES users(user_id) ON DELETE CASCADE,
+      expires_at TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- SECURITY FIX A07: Email verification tokens — hashed
+    CREATE TABLE IF NOT EXISTS email_verifications (
+      token_hash TEXT PRIMARY KEY,
+      user_id    TEXT REFERENCES users(user_id) ON DELETE CASCADE,
+      expires_at TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- SECURITY FIX A07: TOTP MFA secrets for admin accounts (AES-256-GCM encrypted)
+    CREATE TABLE IF NOT EXISTS totp_secrets (
+      user_id          TEXT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+      secret_encrypted TEXT NOT NULL,
+      activated        INTEGER NOT NULL DEFAULT 0,
+      created_at       TEXT DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS crop_scans (
@@ -218,6 +245,11 @@ export async function initDb() {
 
   // Migrations — safe to run on every startup (ALTER TABLE ignored if column exists)
   try { db.run(`ALTER TABLE pest_outbreaks ADD COLUMN source TEXT DEFAULT 'admin'`); } catch { /* already exists */ }
+  // SECURITY FIX A07: Add email_verified column to existing databases
+  try { db.run(`ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`); } catch { /* already exists */ }
+  // SECURITY FIX A04: Migrate password_resets to use token_hash column
+  // (old 'token' column is replaced by 'token_hash' in the CREATE TABLE above)
+  try { db.run(`ALTER TABLE password_resets ADD COLUMN token_hash TEXT`); } catch { /* already exists */ }
 
   // Ensure default roles exist (for legacy role_id column if needed)
   const existingRoles = query(db, `SELECT role_name FROM roles`);

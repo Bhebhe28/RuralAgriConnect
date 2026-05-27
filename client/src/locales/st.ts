@@ -103,14 +103,14 @@ const st: Translations = {
 
   // Chatbot
   chatTitle: '🤖 Motlatsi wa AI wa Polasi',
-  chatSubtitle: 'O thehilwe ke Google Gemini — bua kapa kenya setshwantsho sa selalo bakeng sa tlhahlobo ya potlako',
-  chatGreeting: 'Lumela! Ke motlatsi wa hao wa AI wa polasi o thehilweng ke Gemini. Mpolele ntho efe kapa efe — kapa kenya setshwantsho sa selalo/semela sa hao bakeng sa tlhahlobo ya lefu le dikhokhotlwane ka potlako! 📸',
+  chatSubtitle: 'O thehilwe ke RuralAgriConnect — bua kapa kenya setshwantsho sa selalo bakeng sa tlhahlobo ya potlako',
+  chatGreeting: 'Lumela! Ke motlatsi wa AI wa polasi wa Mong. Mgabhi wa RuralAgriConnect. Mpolele ntho efe kapa efe — kapa kenya setshwantsho sa selalo/semela sa hao bakeng sa tlhahlobo ya lefu le dikhokhotlwane ka potlako! 📸',
   chatPlaceholder: 'Botsa ka diselalo, dikhokhotlwane, mobu, boemo ba leholimo…',
   chatImagePlaceholder: 'Hlalosa seo o batlang ho se tseba (ha ho hlokahale)…',
   chatSend: 'Romela',
   chatScan: '🔍 Hlahloba',
   chatImageReady: '📸 Setshwantsho se lokela ho hlahlobwa',
-  chatImageHint: '📸 Kenya setshwantsho sa semela se kulang, tshenyeho ya dikhokhotlwane, kapa mobu — Gemini e tla e hlahlobela',
+  chatImageHint: '📸 Kenya setshwantsho sa semela se kulang, tshenyeho ya dikhokhotlwane, kapa mobu — RuralAgriConnect AI e tla e hlahlobela',
   chatOfflineError: 'Ha e kgonang ho kopana. Ka kopo hlahloba khokahano ya hao.',
   chatImageError: 'Tshwarelo, tlhahlobo ya setshwantsho e hlolehile. Ka kopo leka hape.',
   chatSuggestion1: 'Ke diselalo dife tse ke lokelang ho di jala selemo sena KZN?',

@@ -183,18 +183,18 @@ function Hero() {
                }}>
             <span className="w-2 h-2 rounded-full animate-pulse flex-shrink-0"
                   style={{ backgroundColor: isDark ? '#A5D6A7' : '#95D5B2' }} />
-            Used by rural farmers across KwaZulu-Natal — no internet required
+            Connecting rural farmers across KwaZulu-Natal in real time
           </div>
           <h1 className="font-serif text-3xl md:text-5xl lg:text-6xl leading-tight mb-4 md:mb-6"
               style={{ color: isDark ? '#C8E6C9' : '#ffffff' }}>
-            Offline Farm<br />
-            <span style={{ color: isDark ? '#A5D6A7' : '#95D5B2' }}>Advisory System</span><br />
-            for Rural Farmers
+            Unified Farmer<br />
+            <span style={{ color: isDark ? '#A5D6A7' : '#95D5B2' }}>Communication</span><br />
+            Platform for KZN
           </h1>
           <p className="text-sm md:text-lg leading-relaxed mb-6 md:mb-8 max-w-lg mx-auto lg:mx-0"
              style={{ color: isDark ? 'rgba(165,214,167,0.80)' : 'rgba(255,255,255,0.75)' }}>
-            Get expert crop advisories, disease alerts, and AI diagnosis — even with no signal.
-            Built for remote KZN fields where connectivity is unreliable.
+            Connect with fellow farmers, detect crop diseases instantly with AI, and receive
+            real-time outbreak alerts — all in one place, designed for remote KZN fields.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center lg:justify-start">
             <button onClick={() => navigate('/login')}
@@ -208,8 +208,8 @@ function Hero() {
             </button>
           </div>
           <div className="flex gap-6 md:gap-10 mt-8 text-sm justify-center lg:justify-start" style={{ color: isDark ? 'rgba(165,214,167,0.7)' : 'rgba(255,255,255,0.6)' }}>
-            <div><span className="font-bold text-xl md:text-2xl block" style={{ color: isDark ? '#A5D6A7' : '#ffffff' }}>100%</span>Works offline</div>
-            <div><span className="font-bold text-xl md:text-2xl block" style={{ color: isDark ? '#A5D6A7' : '#ffffff' }}>200+</span>Crop diseases covered</div>
+            <div><span className="font-bold text-xl md:text-2xl block" style={{ color: isDark ? '#A5D6A7' : '#ffffff' }}>AI</span>Disease diagnosis</div>
+            <div><span className="font-bold text-xl md:text-2xl block" style={{ color: isDark ? '#A5D6A7' : '#ffffff' }}>Live</span>Outbreak alerts</div>
             <div><span className="font-bold text-xl md:text-2xl block" style={{ color: isDark ? '#A5D6A7' : '#ffffff' }}>Free</span>For all farmers</div>
           </div>
         </div>
@@ -266,10 +266,10 @@ function Hero() {
 
 // ── Features ──────────────────────────────────────────────────────────────────
 const FEATURES = [
-  { icon: '📴', title: 'Fully Offline-First', desc: 'All advisories, alerts, and AI responses are cached to your device. No signal? No problem — the app works exactly the same.' },
+  { icon: '💬', title: 'Farmer Community Chat', desc: 'Share field observations, ask questions, and exchange tips in a WhatsApp-style group chat. Information reaches every farmer instantly.' },
+  { icon: '🤖', title: 'AI Disease Diagnosis', desc: 'Snap a photo of a sick plant and get an instant diagnosis from RuralAgriConnect AI, trained on South African farming conditions.' },
+  { icon: '🦠', title: 'Real-Time Outbreak Alerts', desc: 'When a disease is detected anywhere in your region, every farmer is notified immediately — no more finding out too late to act.' },
   { icon: '📋', title: 'Expert Crop Advisories', desc: 'Agricultural officers publish region-specific advisories for KZN crops — maize, vegetables, poultry and more — with step-by-step prevention tips.' },
-  { icon: '🤖', title: 'AI Disease Diagnosis', desc: 'Snap a photo of a sick plant and get an instant diagnosis from Gemini AI, trained on South African farming conditions.' },
-  { icon: '🔔', title: 'Offline Alert Sync', desc: 'Critical weather and disease alerts are synced to your phone automatically. You get notified even when you reconnect after being offline.' },
   { icon: '🌦', title: 'Weather for Your Region', desc: 'Live weather conditions and forecasts for all KZN regions — eThekwini, uMgungundlovu, iLembe, Zululand and more.' },
   { icon: '🌍', title: 'Multilingual Support', desc: 'Available in English, isiZulu, Afrikaans, and Sesotho — so every farmer can access advice in their home language.' },
 ];
@@ -281,10 +281,10 @@ function Features() {
       <div className="max-w-6xl mx-auto px-6">
         <div className="text-center mb-14">
           <h2 className={`font-serif text-3xl md:text-4xl mb-3 ${isDark ? 'text-night-text' : 'text-dark'}`}>
-            Built for Rural Farmers, Not Just Connectivity
+            Everything Rural Farmers Need, in One Platform
           </h2>
           <p className={`text-lg max-w-xl mx-auto ${isDark ? 'text-night-muted' : 'text-muted'}`}>
-            Everything you need to protect your crops — designed to work in remote KZN fields with or without internet
+            Community, AI diagnosis, and outbreak alerts — all built for remote KZN fields
           </p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -360,10 +360,10 @@ function HowItWorks() {
   const navigate = useNavigate();
   const { isDark } = useTheme();
   const steps = [
-    { n: '01', icon: '📲', title: 'Install on Your Phone', desc: 'Add RurAgriConnect to your home screen — it works like a native app, no app store needed.' },
-    { n: '02', icon: '🔄', title: 'Sync While Connected', desc: 'When you have signal, the app automatically downloads the latest advisories, alerts, and weather data.' },
-    { n: '03', icon: '📴', title: 'Use It Offline in the Field', desc: 'Head out to remote fields — all your data is cached. Browse advisories, get AI help, and check alerts without internet.' },
-    { n: '04', icon: '🔔', title: 'Get Alerts When You Reconnect', desc: 'Critical disease and weather alerts are waiting for you the moment you come back online.' },
+    { n: '01', icon: '📲', title: 'Join the Community', desc: 'Register and connect with farmers in your district. Share observations and get advice from fellow farmers and extension officers.' },
+    { n: '02', icon: '📷', title: 'Scan Sick Crops Instantly', desc: 'Take a photo of any diseased plant — our AI identifies the disease within seconds and recommends treatment.' },
+    { n: '03', icon: '🦠', title: 'Trigger Outbreak Alerts', desc: 'When disease is detected, RurAgriConnect automatically alerts every farmer in your region so they can protect their crops before it spreads.' },
+    { n: '04', icon: '📴', title: 'Works Offline Too', desc: 'No signal? No problem — advisories, scans, and alerts are cached. Queued scans process automatically when you reconnect.' },
   ];
 
   return (
@@ -371,10 +371,10 @@ function HowItWorks() {
       <div className="max-w-6xl mx-auto px-6">
         <div className="text-center mb-14">
           <h2 className={`font-serif text-3xl md:text-4xl mb-3 ${isDark ? 'text-night-text' : 'text-dark'}`}>
-            How the Offline Advisory Works
+            How RurAgriConnect Works
           </h2>
           <p className={`text-lg ${isDark ? 'text-night-muted' : 'text-muted'}`}>
-            Sync once, use anywhere — even deep in the field with no signal
+            From disease detection to community alerts — protecting every farm in KZN
           </p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
@@ -578,10 +578,10 @@ function CTABanner() {
     <section className={`py-20 ${isDark ? 'bg-gradient-to-r from-[#091509] to-[#0E200E]' : 'bg-gradient-to-r from-moss to-forest-mid'}`}>
       <div className="max-w-3xl mx-auto px-6 text-center">
         <h2 className="font-serif text-3xl md:text-4xl mb-4" style={{ color: isDark ? '#A5D6A7' : '#ffffff' }}>
-          Advisory Access for Every KZN Farmer
+          Join the Farming Community That Protects Each Other
         </h2>
         <p className="text-lg mb-8" style={{ color: isDark ? 'rgba(165,214,167,0.75)' : 'rgba(255,255,255,0.75)' }}>
-          No internet? No problem. Register now and get expert crop advisories, disease alerts, and AI diagnosis — free, offline, in your language.
+          Register now — connect with farmers in your district, get instant AI disease diagnosis, and receive real-time outbreak alerts. Free, in your language.
         </p>
         <div className="flex flex-wrap justify-center gap-4">
           <button onClick={() => navigate('/login')}

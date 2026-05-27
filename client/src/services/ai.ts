@@ -1,48 +1,14 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { auth } from '../firebase';
 import { saveCropScan } from './firestore';
 
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
-
-const SYSTEM_PROMPT = `You are an expert agricultural advisor for small-scale farmers in KwaZulu-Natal, South Africa.
-You specialize in crop management, pest and disease identification, soil health, fertilization, irrigation, and local KZN farming practices.
-When analyzing images: identify crop diseases, pest damage, or nutrient deficiencies. Give a clear diagnosis with confidence level and specific treatment recommendations using locally available South African products.
-Keep responses practical, concise, and actionable. Use simple language suitable for rural farmers.`;
-
-const MODELS = [
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-lite',
-  'gemini-1.5-flash',
-  'gemini-1.5-flash-8b',
-  'gemini-2.5-flash-preview-05-20',
-];
-
-function getModel(modelName: string, sysPrompt: string = SYSTEM_PROMPT) {
-  const genAI = new GoogleGenerativeAI(API_KEY);
-  return genAI.getGenerativeModel({ model: modelName, systemInstruction: sysPrompt });
+// ── Auth token helper ────────────────────────────────────────
+async function getIdToken(): Promise<string | null> {
+  try { return (await auth.currentUser?.getIdToken()) ?? null; } catch { return null; }
 }
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-async function tryModels<T>(fn: (model: ReturnType<typeof getModel>) => Promise<T>, sysPrompt?: string): Promise<T> {
-  const errors: string[] = [];
-  for (const name of MODELS) {
-    try {
-      return await fn(getModel(name, sysPrompt));
-    } catch (err: any) {
-      const msg = `${name}: ${err.message?.slice(0, 300)}`;
-      errors.push(msg);
-      await sleep(1000);
-    }
-  }
-  throw new Error(errors.join(' | '));
-}
-
-function buildSystemPrompt(language: string): string {
-  let prompt = SYSTEM_PROMPT;
-  if (language === 'zu') prompt += '\n\nCRITICAL LANGUAGE RULE: You MUST respond ONLY in isiZulu for every single reply, no exceptions. Never switch to English regardless of what language the farmer writes in. If unsure of an isiZulu term, use the closest equivalent.';
-  if (language === 'af') prompt += '\n\nKRITIESE TAALREËL: Jy MOET altyd en uitsluitlik in Afrikaans antwoord, sonder uitsondering. Moenie oorskakel na Engels nie, maak nie saak in watter taal die boer skryf nie.';
-  if (language === 'st') prompt += '\n\nMOLAO O BOHLOKOA OA PUO: O TLAMEHA ho araba feela ka Sesotho mesebetsing yohle, ho sa natsoe hore ke puo efe eo molemisi a e sebelisang.';
-  return prompt;
+// ── A03: Strip credential-like patterns from AI output ───────
+function sanitizeAIOutput(text: string): string {
+  return text.replace(/\b(VITE_|API_KEY|SECRET|TOKEN|PASSWORD)\s*[=:]\s*\S+/gi, '[REDACTED]');
 }
 
 // ── TEXT CHAT ────────────────────────────────────────────────
@@ -51,18 +17,19 @@ export async function sendChatMessage(
   history: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [],
   language = 'en'
 ): Promise<string> {
-  if (!API_KEY) return getFallback(message);
-
-  const systemPrompt = buildSystemPrompt(language);
-
   try {
-    return await tryModels(async (model) => {
-      const chat = model.startChat({ history });
-      const result = await chat.sendMessage(message);
-      return result.response.text();
-    }, systemPrompt);
+    const token = await getIdToken();
+    if (!token) return getFallback(message);
+
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ message, history, language }),
+    });
+    if (!res.ok) throw new Error(`Backend ${res.status}`);
+    const data = await res.json();
+    return sanitizeAIOutput(data.reply as string);
   } catch (err: any) {
-    // Return fallback but surface quota/network errors clearly
     const msg = (err?.message || '').toLowerCase();
     if (msg.includes('429') || msg.includes('quota')) {
       return '⚠️ AI is busy right now (daily quota reached). Please try again tomorrow, or describe your issue and I\'ll give you advice from my knowledge base.\n\n' + getFallback(message);
@@ -74,14 +41,102 @@ export async function sendChatMessage(
   }
 }
 
+// ── Scan image thumbnail (canvas compress → base64) ──────────
+function compressScanThumbnail(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const MAX = 500;
+      let w = img.width, h = img.height;
+      if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+      else       { w = Math.round(w * MAX / h); h = MAX; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.75));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('compress failed')); };
+    img.src = url;
+  });
+}
+
+// ── OFFLINE SCAN QUEUE ───────────────────────────────────────
+const SCAN_QUEUE_KEY = 'rac_scan_queue';
+
+type QueuedScan = {
+  id: string;
+  base64: string;
+  mimeType: string;
+  fileName: string;
+  language: string;
+  queuedAt: string;
+};
+
+function readQueue(): QueuedScan[] {
+  try { return JSON.parse(localStorage.getItem(SCAN_QUEUE_KEY) || '[]'); } catch { return []; }
+}
+function writeQueue(q: QueuedScan[]) {
+  try { localStorage.setItem(SCAN_QUEUE_KEY, JSON.stringify(q)); } catch {}
+}
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve((r.result as string).split(',')[1]);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
+export function getPendingScanCount(): number {
+  return readQueue().length;
+}
+
+export async function processScanQueue(): Promise<void> {
+  const queue = readQueue();
+  if (queue.length === 0) return;
+  const token = await getIdToken();
+  if (!token) return;
+
+  const remaining: QueuedScan[] = [];
+  for (const item of queue) {
+    try {
+      const blob = await (await fetch(`data:${item.mimeType};base64,${item.base64}`)).blob();
+      const file = new File([blob], item.fileName, { type: item.mimeType });
+      const formData = new FormData();
+      formData.append('image', file);
+      formData.append('language', item.language);
+      const res = await fetch('/api/chat/scan', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const reply = sanitizeAIOutput(data.reply as string);
+        const meta = parseScan(reply);
+        saveCropScan({
+          diagnosis: reply, crop_type: meta.crop_type,
+          disease_name: meta.diseaseName, has_disease: meta.hasDisease, severity: meta.severity,
+        }).catch(() => {});
+      } else {
+        remaining.push(item);
+      }
+    } catch {
+      remaining.push(item);
+    }
+  }
+  writeQueue(remaining);
+}
+
 // ── IMAGE SCAN ───────────────────────────────────────────────
 export async function scanImage(
   file: File,
   prompt?: string,
   language = 'en'
 ): Promise<{ reply: string; hasDisease: boolean; diseaseName: string; severity: string }> {
-  // Accept all common types + HEIC/HEIF from iPhone. Empty type also treated as JPEG.
-  const heicTypes = ['image/heic', 'image/heif'];
+  const heicTypes  = ['image/heic', 'image/heif'];
   const supported  = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
   const isHeic     = heicTypes.includes(file.type.toLowerCase());
   const isEmpty    = !file.type;
@@ -94,31 +149,81 @@ export async function scanImage(
     };
   }
 
-  // Use jpeg as fallback mimeType for HEIC or unknown types — Gemini handles the raw bytes
-  const mimeType = isSupported ? file.type : 'image/jpeg';
+  // Compress thumbnail BEFORE the API call so we always have the image to save
+  let thumbnail: string | undefined;
+  try { thumbnail = await compressScanThumbnail(file); } catch {}
 
-  const base64 = await fileToBase64(file);
-  const imageData = { inlineData: { mimeType, data: base64 } };
-  const scanPrompt = prompt || 'Analyze this farm image. Identify any crop diseases, pest damage, or nutrient deficiencies. Provide: 1) Disease/issue name, 2) Confidence level, 3) Symptoms visible, 4) Treatment steps using locally available South African products, 5) Prevention tips for a KZN farmer.';
-
-  const scanSystemPrompt = buildSystemPrompt(language);
+  const token = await getIdToken();
 
   try {
-    const reply = await tryModels(async (model) => {
-      const result = await model.generateContent([scanPrompt, imageData]);
-      return result.response.text();
-    }, scanSystemPrompt);
+    if (!token) throw new Error('Not authenticated');
+
+    const formData = new FormData();
+    formData.append('image', file);
+    if (prompt) formData.append('prompt', prompt);
+    formData.append('language', language);
+
+    const res = await fetch('/api/chat/scan', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    if (!res.ok) throw new Error(`Backend ${res.status}`);
+    const data = await res.json();
+    const reply = sanitizeAIOutput(data.reply as string);
+
+    if (data.scanFailed) {
+      // Server processed the request but AI was unavailable (quota, etc.) — save as failed
+      saveCropScan({
+        diagnosis: reply, crop_type: 'Unknown', disease_name: '',
+        has_disease: false, severity: 'info', image_url: thumbnail, status: 'failed',
+      }).catch(() => {});
+      return { reply, hasDisease: false, diseaseName: '', severity: 'info' };
+    }
 
     const meta = parseScan(reply);
     saveCropScan({
-      diagnosis:    reply,
-      crop_type:    meta.crop_type,
-      disease_name: meta.diseaseName,
-      has_disease:  meta.hasDisease,
-      severity:     meta.severity,
-    }).catch(() => {});
+      diagnosis: reply, crop_type: meta.crop_type, disease_name: meta.diseaseName,
+      has_disease: meta.hasDisease, severity: meta.severity, image_url: thumbnail, status: 'success',
+    }).catch((e) => console.error('[ScanSave]', e));
     return { reply, ...meta };
-  } catch {
+  } catch (err: any) {
+    const isOfflineError = !navigator.onLine ||
+      ['fetch', 'network', 'failed to fetch'].some(k => (err?.message || '').toLowerCase().includes(k));
+
+    if (isOfflineError && !navigator.onLine) {
+      try {
+        const base64 = await fileToBase64(file);
+        const queue = readQueue();
+        queue.push({
+          id: Date.now().toString(),
+          base64,
+          mimeType: file.type || 'image/jpeg',
+          fileName: file.name || 'crop.jpg',
+          language,
+          queuedAt: new Date().toISOString(),
+        });
+        writeQueue(queue);
+        return {
+          reply: '📴 You\'re offline — your scan has been saved and will be processed automatically when you reconnect.',
+          hasDisease: false, diseaseName: '', severity: 'info',
+        };
+      } catch {}
+    }
+
+    // Save the failed attempt so it shows in scan history with the photo
+    if (token) {
+      saveCropScan({
+        diagnosis: 'Scan failed — AI service temporarily unavailable. This is usually a quota issue that resets daily.',
+        crop_type: 'Unknown',
+        disease_name: '',
+        has_disease: false,
+        severity: 'info',
+        image_url: thumbnail,
+        status: 'failed',
+      }).catch(() => {});
+    }
+
     return {
       reply: '🔍 I could not analyse this image right now. Please describe what you see (yellowing leaves, spots, wilting, etc.) and I\'ll advise you based on your description.',
       hasDisease: false, diseaseName: '', severity: 'info',
@@ -126,18 +231,7 @@ export async function scanImage(
   }
 }
 
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      resolve(result.split(',')[1]); // strip data:image/...;base64,
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
+// ── Scan result parser ────────────────────────────────────────
 const CRITICAL_TERMS    = ['armyworm', 'locust', 'bacterial wilt', 'late blight', 'stem borer', 'mosaic virus'];
 const WARNING_TERMS     = ['blight', 'rust', 'rot', 'mildew', 'fungal', 'aphid', 'whitefly', 'thrips'];
 const HEALTHY_TERMS     = ['healthy', 'no disease', 'no sign of disease', 'no pest', 'normal growth'];
@@ -150,23 +244,41 @@ const CROP_MAP: [string, string][] = [
 
 function parseScan(text: string) {
   const lower = text.toLowerCase();
-  const isHealthy     = HEALTHY_TERMS.some(k => lower.includes(k));
+
+  // Extract the DISEASE NAME header so "healthy" in treatment/prevention text
+  // doesn't falsely mark a diseased plant as healthy
+  const diseaseHeaderMatch = text.match(/\*\*[^*]*DISEASE[^*]*:\*\*\s*([^\n]+)/i);
+  const diseaseHeader = diseaseHeaderMatch
+    ? diseaseHeaderMatch[1].trim().replace(/\*+/g, '').trim()
+    : null;
+
+  const isHealthy = diseaseHeader
+    ? /^healthy\s*plant$/i.test(diseaseHeader) || /^no\s+disease/i.test(diseaseHeader) || /^normal\s+growth/i.test(diseaseHeader)
+    : HEALTHY_TERMS.some(k => lower.slice(0, 300).includes(k));
+
   const isNonPathogen = NON_DISEASE_TERMS.some(k => lower.includes(k));
   const isCritical    = CRITICAL_TERMS.some(k => lower.includes(k));
   const isWarning     = WARNING_TERMS.some(k => lower.includes(k));
-  const hasDisease    = !isHealthy && !isNonPathogen &&
-                        (isCritical || isWarning || lower.includes('infection') ||
-                         (lower.includes('disease') && !lower.includes('no disease')));
-  const cropMatch  = CROP_MAP.find(([k]) => lower.includes(k));
-  const nameMatch  = text.match(/(?:disease\/issue name|identified as|diagnosis)[:\s*]+([^\n.]+)/i) || text.match(/\*\*([^*]{5,50})\*\*/);
+  const hasDisease    = !isHealthy && !isNonPathogen && (
+    isCritical || isWarning ||
+    (diseaseHeader && !/healthy/i.test(diseaseHeader)) ||
+    lower.includes('infection') || lower.includes('pest damage')
+  );
+
+  const cropMatch = CROP_MAP.find(([k]) => lower.includes(k));
+  const name = diseaseHeader && diseaseHeader.length > 2
+    ? diseaseHeader.slice(0, 60)
+    : (text.match(/(?:disease\/issue name|identified as|diagnosis)[:\s*]+([^\n.]+)/i)?.[1] || 'Disease/Pest Detected').trim().replace(/\*+/g, '').slice(0, 60);
+
   return {
     hasDisease,
-    diseaseName: nameMatch ? nameMatch[1].trim().replace(/\*+/g, '').slice(0, 60) : 'Disease/Pest Detected',
+    diseaseName: name,
     severity: (isCritical ? 'critical' : 'warning') as string,
     crop_type: cropMatch ? cropMatch[1] : 'Crops',
   };
 }
 
+// ── Offline fallback ─────────────────────────────────────────
 function getFallback(msg: string): string {
   const lower = msg.toLowerCase();
   if (lower.includes('maize') || lower.includes('corn'))

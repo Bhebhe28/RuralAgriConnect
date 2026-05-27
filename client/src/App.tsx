@@ -17,12 +17,10 @@ import Profile from './pages/Profile';
 import PublishAdvisory from './pages/PublishAdvisory';
 import ManageFarmers from './pages/ManageFarmers';
 import AdminPanel from './pages/AdminPanel';
-import YieldReport from './pages/YieldReport';
-import SubsidyRequest from './pages/SubsidyRequest';
 import CropCalendar from './pages/CropCalendar';
 import Community from './pages/Community';
 import OutbreakDashboard from './pages/OutbreakDashboard';
-import FarmFields from './pages/FarmFields';
+import ScanHistory from './pages/ScanHistory';
 import Analytics from './pages/Analytics';
 import ExportReports from './pages/ExportReports';
 
@@ -78,12 +76,10 @@ function AppRoutes() {
         <Route path="chatbot"        element={<Chatbot />} />
         <Route path="notifications"  element={<Notifications />} />
         <Route path="profile"        element={<Profile />} />
-        <Route path="yields"         element={<YieldReport />} />
-        <Route path="subsidies"      element={<SubsidyRequest />} />
         <Route path="calendar"       element={<CropCalendar />} />
         <Route path="community"      element={<Community />} />
         <Route path="outbreaks"      element={<OutbreakDashboard />} />
-        <Route path="fields"         element={<FarmFields />} />
+        <Route path="scans"          element={<ScanHistory />} />
         <Route path="analytics"      element={<AdminRoute><Analytics /></AdminRoute>} />
         <Route path="export"         element={<AdminRoute><ExportReports /></AdminRoute>} />
         <Route path="publish"   element={<AdminRoute><PublishAdvisory /></AdminRoute>} />

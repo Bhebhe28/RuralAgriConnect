@@ -7,7 +7,11 @@
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "db:seed": "ts-node src/db/seed.ts"
+    "db:seed": "ts-node src/db/seed.ts",
+    "audit": "npm audit --audit-level=high",
+    "audit:fix": "npm audit fix",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.94.0",
@@ -20,6 +24,7 @@
     "@types/multer": "^2.1.0",
     "@types/node": "^20.11.30",
     "@types/nodemailer": "^8.0.0",
+    "@types/qrcode": "^1.5.6",
     "@types/sql.js": "^1.4.9",
     "@types/uuid": "^9.0.8",
     "bcryptjs": "^2.4.3",
@@ -27,16 +32,23 @@
     "dotenv": "^16.4.5",
     "express": "^4.18.3",
     "express-rate-limit": "^8.3.2",
+    "firebase-admin": "^12.7.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.1.1",
     "nodemailer": "^8.0.5",
+    "openai": "^6.39.0",
+    "otplib": "^12.0.1",
+    "qrcode": "^1.5.4",
     "resend": "^6.12.3",
     "sql.js": "^1.12.0",
     "typescript": "^5.4.3",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
-    "ts-node-dev": "^2.0.0"
+    "@vitest/coverage-v8": "^2.1.0",
+    "ts-node-dev": "^2.0.0",
+    "vitest": "^2.1.0"
   }
 }

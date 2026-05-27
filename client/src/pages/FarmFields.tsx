@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getFarmFields, createFarmField, updateFarmField, deleteFarmField } from '../services/firestore';
 import { useAuth } from '../context/AuthContext';
+import { isValidHectares, isValidLatSA, isValidLngSA, isValidLength } from '../utils';
 
 interface Field {
   id: string;
@@ -62,6 +63,16 @@ export default function FarmFields() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isValidLength(form.field_name, 2, 100))
+      return setSaved('❌ Field name must be 2–100 characters.');
+    if (!isValidHectares(form.area_hectares))
+      return setSaved('❌ Area must be between 0.1 and 50 000 hectares.');
+    if (form.gps_lat && !isValidLatSA(form.gps_lat))
+      return setSaved('❌ Latitude must be between -35 and -22 (South Africa range).');
+    if (form.gps_lng && !isValidLngSA(form.gps_lng))
+      return setSaved('❌ Longitude must be between 16 and 33 (South Africa range).');
+    if (form.notes && !isValidLength(form.notes, 0, 1000))
+      return setSaved('❌ Notes must not exceed 1 000 characters.');
     try {
       const payload = {
         ...form,
@@ -81,8 +92,8 @@ export default function FarmFields() {
       setForm({ field_name: '', crop_type: 'Maize', area_hectares: '', gps_lat: '', gps_lng: '', soil_type: 'Loam', irrigation: 'none', notes: '' });
       load();
       setTimeout(() => setSaved(''), 3000);
-    } catch (err: any) {
-      setSaved('❌ ' + (err.message || 'Failed'));
+    } catch {
+      setSaved('❌ Failed to save field. Please try again.');
     }
   };
 
@@ -151,7 +162,7 @@ export default function FarmFields() {
               <div>
                 <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1.5">Field Name</label>
                 <input className="input" placeholder="e.g. North Field A" value={form.field_name}
-                  onChange={e => setForm(f => ({ ...f, field_name: e.target.value }))} required />
+                  onChange={e => setForm(f => ({ ...f, field_name: e.target.value }))} maxLength={100} required />
               </div>
               <div>
                 <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1.5">Crop Type</label>
@@ -163,7 +174,7 @@ export default function FarmFields() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1.5">Area (Hectares)</label>
-                <input className="input" type="number" step="0.1" min="0.1" placeholder="e.g. 3.5"
+                <input className="input" type="number" step="0.1" min="0.1" max="50000" placeholder="e.g. 3.5"
                   value={form.area_hectares} onChange={e => setForm(f => ({ ...f, area_hectares: e.target.value }))} required />
               </div>
               <div>
@@ -176,9 +187,11 @@ export default function FarmFields() {
             <div>
               <label className="block text-xs font-bold text-muted uppercase tracking-wide mb-1.5">GPS Location</label>
               <div className="flex gap-2">
-                <input className="input flex-1" placeholder="Latitude" value={form.gps_lat}
+                <input className="input flex-1" placeholder="Lat (-35 to -22)" value={form.gps_lat}
+                  type="number" step="0.000001" min="-35" max="-22"
                   onChange={e => setForm(f => ({ ...f, gps_lat: e.target.value }))} />
-                <input className="input flex-1" placeholder="Longitude" value={form.gps_lng}
+                <input className="input flex-1" placeholder="Lng (16 to 33)" value={form.gps_lng}
+                  type="number" step="0.000001" min="16" max="33"
                   onChange={e => setForm(f => ({ ...f, gps_lng: e.target.value }))} />
                 <button type="button" onClick={getGPS} disabled={gpsLoading}
                   className="btn-outline px-3 flex-shrink-0 text-sm">

@@ -49,6 +49,12 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
 router.put('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   const { field_name, crop_type, area_hectares, gps_lat, gps_lng, soil_type, irrigation, notes } = req.body;
   const db = await getDb();
+
+  // A01: Verify ownership before allowing update — return 403 if field belongs to another user
+  const existing = query<any>(db, `SELECT farmer_id FROM farm_fields WHERE field_id = ?`, [req.params.id]);
+  if (!existing.length) return res.status(404).json({ error: 'Field not found' });
+  if (existing[0].farmer_id !== req.user!.id) return res.status(403).json({ error: 'Not allowed' });
+
   run(db, `UPDATE farm_fields SET field_name=?, crop_type=?, area_hectares=?, gps_lat=?, gps_lng=?, soil_type=?, irrigation=?, notes=?, updated_at=? WHERE field_id=? AND farmer_id=?`,
     [field_name, crop_type, parseFloat(area_hectares), gps_lat || null, gps_lng || null,
      soil_type || null, irrigation || 'none', notes || null, new Date().toISOString(),

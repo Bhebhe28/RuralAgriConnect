@@ -40,6 +40,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   isAdmin: boolean;
+  idleWarning: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -103,11 +104,17 @@ async function verifyOfflineCreds(email: string, password: string): Promise<bool
   } catch { return false; }
 }
 
+// A07: 5-minute idle session timeout (PCI DSS 8.1.8 — max 15 min; 5 min is stricter)
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+const IDLE_WARNING_MS = IDLE_TIMEOUT_MS - 30_000; // warn 30 s before lock
+const IDLE_EVENTS     = ['mousedown', 'keydown', 'touchstart', 'scroll'] as const;
+
 // ════════════════════════════════════════════════════════════════
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser]                 = useState<AppUser | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [loading, setLoading]           = useState(true);
+  const [idleWarning, setIdleWarning]   = useState(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
@@ -167,7 +174,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (auth.currentUser) {
       const currentEmail = auth.currentUser.email?.toLowerCase();
       if (currentEmail === email.toLowerCase()) {
-        // Verify password locally — works offline
+        // Same user — verify password locally, works offline
         const valid = await verifyOfflineCreds(email, password);
         if (valid) {
           const cached = loadProfile();
@@ -179,12 +186,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
         }
-        // Wrong password
         const err: any = new Error('Wrong password');
         err.code = 'auth/wrong-password';
         throw err;
       }
-      // Different user — sign out the current Firebase session first
+      // Different user switching in — wipe the previous session's cached data
+      // immediately so no stale profile can leak through during the sign-out gap
+      localStorage.removeItem(PROFILE_KEY);
+      localStorage.removeItem(CREDS_KEY);
+      setUser(null);
+      setLocked(false);
       await signOut(auth);
     }
 
@@ -226,13 +237,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const profile: AppUser = {
       id: cred.user.uid, name, email,
       phone: phone || undefined,
-      role: (role as AppUser['role']) || 'farmer',
+      role: 'farmer', // Always 'farmer'; admin role is assigned only via admin panel
       region: region || undefined,
     };
     await setDoc(doc(db, 'users', cred.user.uid), {
       name, email,
       phone:      phone || null,
-      role:       role || 'farmer',
+      role:       'farmer',
       region:     region || null,
       avatar_url: null,
       created_at: new Date().toISOString(),
@@ -242,6 +253,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Do NOT unlock or set session active — user must sign in manually
     logger.auth('Registered', `${name} (${role || 'farmer'})`);
   };
+
+  // Idle session timeout — warn at 4:30, lock at 5:00 of inactivity
+  useEffect(() => {
+    if (!user) return;
+    let warnTimer: ReturnType<typeof setTimeout>;
+    let lockTimer: ReturnType<typeof setTimeout>;
+    const reset = () => {
+      clearTimeout(warnTimer);
+      clearTimeout(lockTimer);
+      setIdleWarning(false);
+      warnTimer = setTimeout(() => setIdleWarning(true), IDLE_WARNING_MS);
+      lockTimer = setTimeout(() => {
+        setLocked(true);
+        setSessionActive(false);
+        setUser(null);
+        setIdleWarning(false);
+        logger.auth('Session expired (5-min idle timeout)');
+      }, IDLE_TIMEOUT_MS);
+    };
+    IDLE_EVENTS.forEach(e => window.addEventListener(e, reset, { passive: true }));
+    reset();
+    return () => {
+      clearTimeout(warnTimer);
+      clearTimeout(lockTimer);
+      IDLE_EVENTS.forEach(e => window.removeEventListener(e, reset));
+    };
+  }, [user]);
 
   const logout = async () => {
     // Lock the session — clears React state but keeps Firebase Auth alive.
@@ -269,6 +307,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user, firebaseUser, loading,
       login, register, logout, refreshUser,
       isAdmin: user?.role === 'admin',
+      idleWarning,
     }}>
       {children}
     </AuthContext.Provider>
@@ -280,7 +319,7 @@ export function useAuth() {
   if (!ctx) return {
     user: null, firebaseUser: null, loading: false,
     login: async () => {}, register: async () => {}, logout: async () => {}, refreshUser: async () => {},
-    isAdmin: false,
+    isAdmin: false, idleWarning: false,
   };
   return ctx;
 }

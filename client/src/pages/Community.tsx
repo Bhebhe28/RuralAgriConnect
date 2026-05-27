@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { getCommunityPosts, getCommunityPost, createCommunityPost, addReply, likePost } from '../services/firestore';
+import { getCommunityPosts, getCommunityPost, createCommunityPost, addReply, likePost, createChannel, deletePost, deleteReply, muteUserInChannel, unmuteUserInChannel } from '../services/firestore';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
@@ -7,6 +7,7 @@ interface Post {
   post_id: string; title: string; body: string; category: string;
   image_url?: string | null; likes: number; created_at: string;
   author_name: string; author_avatar?: string | null; reply_count: number; user_id: string;
+  is_channel?: boolean; channel_emoji?: string | null; muted_users?: string[];
 }
 interface Reply {
   reply_id: string; body: string;
@@ -162,7 +163,7 @@ function LocCard({ lat, lng, mine }: { lat: number; lng: number; mine: boolean }
 
 // ════════════════════════════════════════════════════════════════
 export default function Community() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { isDark } = useTheme();
   const [posts, setPosts]           = useState<Post[]>([]);
   const [selected, setSelected]     = useState<PostDetail | null>(null);
@@ -180,6 +181,11 @@ export default function Community() {
   const [locLoading, setLocLoading] = useState(false);
   const [sendError, setSendError]   = useState('');
   const [attachError, setAttachError] = useState('');
+
+  // Admin
+  const [createChOpen, setCreateChOpen] = useState(false);
+  const [newCh, setNewCh]               = useState({ name: '', emoji: '💬', description: '' });
+  const [manageOpen, setManageOpen]     = useState(false);
 
   const endRef    = useRef<HTMLDivElement>(null);
   const fileRef   = useRef<HTMLInputElement>(null);
@@ -226,6 +232,11 @@ export default function Community() {
   // ── Send ──────────────────────────────────────────────────────
   const handleSend = async () => {
     if ((!msgText.trim() && !pendingMedia) || !selected || submitting) return;
+    // Mute check — user has been removed from this channel by admin
+    if (selected.muted_users?.includes(user?.id || '')) {
+      setSendError('You have been removed from this group by the admin.');
+      return;
+    }
     setSubmitting(true);
     setSendError('');
     try {
@@ -235,7 +246,8 @@ export default function Community() {
         document: `📄 ${pm?.name || 'Document'}`, location: '📍 Location',
       };
       const txt = msgText.trim() || (pm ? bodyMap[pm.type] : '');
-      await addReply(selected.post_id, txt, pm?.url, pm?.type, user?.avatar_url, pm?.name);
+      // Pass title + authorId so addReply doesn't need to pre-fetch the post
+      await addReply(selected.post_id, txt, pm?.url, pm?.type, user?.avatar_url, pm?.name, selected.title, selected.user_id);
       setMsgText(''); setPendingMedia(null);
       await openPost(selected.post_id);
     } catch (err: any) {
@@ -314,7 +326,43 @@ export default function Community() {
     } finally { setSubmitting(false); }
   };
 
-  const filtered = cat === 'All' ? posts : posts.filter(p => p.category === cat);
+  // ── Admin handlers ─────────────────────────────────────────
+  const handleDeleteMsg = async (replyId: string, isRoot: boolean) => {
+    if (!selected) return;
+    if (!window.confirm('Delete this message?')) return;
+    try {
+      if (isRoot) { await deletePost(selected.post_id); setSelected(null); load(); }
+      else { await deleteReply(selected.post_id, replyId); await openPost(selected.post_id); }
+    } catch { /* silent */ }
+  };
+
+  const handleMuteUser = async (userId: string, userName: string) => {
+    if (!selected?.is_channel) return;
+    if (!window.confirm(`Remove ${userName} from this group? They will no longer be able to reply.`)) return;
+    await muteUserInChannel(selected.post_id, userId);
+    await openPost(selected.post_id);
+  };
+
+  const handleUnmute = async (userId: string) => {
+    if (!selected) return;
+    await unmuteUserInChannel(selected.post_id, userId);
+    await openPost(selected.post_id);
+  };
+
+  const handleCreateChannel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await createChannel(newCh.name.trim(), newCh.emoji, newCh.description.trim());
+      setCreateChOpen(false);
+      setNewCh({ name: '', emoji: '💬', description: '' });
+      load();
+    } finally { setSubmitting(false); }
+  };
+
+  const channels = posts.filter(p => p.is_channel);
+  const filtered = (cat === 'All' ? posts : posts.filter(p => p.category === cat)).filter(p => !p.is_channel);
 
   // Flat message list: root post + replies
   const messages: (Reply & { isRoot?: boolean })[] = selected ? [
@@ -375,6 +423,78 @@ export default function Community() {
         </div>
       )}
 
+      {/* ── Create Channel modal (admin) ──────────────────────── */}
+      {createChOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-2xl overflow-hidden shadow-2xl" style={{ background: isDark ? '#202c33' : '#fff' }}>
+            <div className="px-4 py-3 flex items-center justify-between" style={{ background:'#075E54' }}>
+              <span className="text-white font-semibold">Create Group</span>
+              <button onClick={() => setCreateChOpen(false)} className="text-white text-xl">✕</button>
+            </div>
+            <form onSubmit={handleCreateChannel} className="p-4 space-y-3">
+              <div className="flex gap-2">
+                {['💬','🌾','🦠','🌦','💰','🔧','🌱','👨‍🌾','📢'].map(e => (
+                  <button key={e} type="button" onClick={() => setNewCh(f => ({ ...f, emoji: e }))}
+                    className={`text-xl w-9 h-9 rounded-full transition-all ${newCh.emoji === e ? 'bg-forest scale-110' : (isDark ? 'bg-night-card' : 'bg-sand')}`}>
+                    {e}
+                  </button>
+                ))}
+              </div>
+              <input className="w-full px-4 py-2.5 rounded-xl text-sm outline-none"
+                style={{ background: isDark?'#2a3942':'#f0f2f5', color: isDark?'#e9edef':'#111b21' }}
+                placeholder="Group name (e.g. Maize Farmers KZN)" value={newCh.name}
+                onChange={e => setNewCh(f => ({ ...f, name: e.target.value }))} required maxLength={60} />
+              <textarea className="w-full px-4 py-2.5 rounded-xl text-sm outline-none resize-none"
+                style={{ background: isDark?'#2a3942':'#f0f2f5', color: isDark?'#e9edef':'#111b21' }}
+                placeholder="Group description" rows={3} value={newCh.description}
+                onChange={e => setNewCh(f => ({ ...f, description: e.target.value }))} maxLength={200} />
+              <button type="submit" disabled={submitting || !newCh.name.trim()}
+                className="w-full py-2.5 rounded-full text-white font-semibold text-sm disabled:opacity-60"
+                style={{ background:'#075E54' }}>
+                {submitting ? 'Creating…' : 'Create Group'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Manage Group modal (admin) ─────────────────────────── */}
+      {manageOpen && selected?.is_channel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl" style={{ background: isDark ? '#202c33' : '#fff' }}>
+            <div className="px-4 py-3 flex items-center justify-between" style={{ background:'#075E54' }}>
+              <span className="text-white font-semibold">{selected.channel_emoji || '💬'} {selected.title}</span>
+              <button onClick={() => setManageOpen(false)} className="text-white text-xl">✕</button>
+            </div>
+            <div className="p-4">
+              <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: isDark?'#8696a0':'#667781' }}>
+                Muted Members ({selected.muted_users?.length || 0})
+              </p>
+              {(selected.muted_users?.length || 0) === 0 ? (
+                <p className="text-sm text-center py-4" style={{ color: isDark?'#8696a0':'#667781' }}>No muted members</p>
+              ) : (
+                <div className="space-y-2 mb-4">
+                  {selected.muted_users?.map(uid => (
+                    <div key={uid} className="flex items-center justify-between px-3 py-2 rounded-xl"
+                      style={{ background: isDark?'#2a3942':'#f0f2f5' }}>
+                      <span className="text-sm" style={{ color: isDark?'#e9edef':'#111b21' }}>User {uid.slice(0,8)}…</span>
+                      <button onClick={() => handleUnmute(uid)}
+                        className="text-xs px-3 py-1 rounded-full text-white" style={{ background:'#25D366' }}>
+                        Restore
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button onClick={async () => { if (window.confirm('Delete this group and all its messages?')) { await deletePost(selected.post_id); setSelected(null); setManageOpen(false); load(); } }}
+                className="w-full py-2 rounded-xl text-white text-sm font-semibold" style={{ background:'#e53935' }}>
+                🗑️ Delete Group
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Main two-panel layout ─────────────────────────────── */}
       <div className="flex overflow-hidden flex-1 min-h-0">
 
@@ -388,12 +508,20 @@ export default function Community() {
               <UserAvatar name={user?.name||'?'} url={user?.avatar_url} size={38} />
               <span className="text-white font-bold text-base">Community</span>
             </div>
-            <button onClick={() => setNewPostOpen(true)}
-              className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10">
-              <svg width="20" height="20" fill="white" viewBox="0 0 24 24">
-                <path d="M20.71 7.04c.39-.39.39-1.04 0-1.41l-2.34-2.34c-.37-.39-1.02-.39-1.41 0l-1.84 1.83 3.75 3.75M3 17.25V21h3.75L17.81 9.93l-3.75-3.75L3 17.25z"/>
-              </svg>
-            </button>
+            <div className="flex items-center gap-1">
+              {isAdmin && (
+                <button onClick={() => setCreateChOpen(true)} title="Create Group"
+                  className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 text-white font-bold text-lg">
+                  +
+                </button>
+              )}
+              <button onClick={() => setNewPostOpen(true)}
+                className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10">
+                <svg width="20" height="20" fill="white" viewBox="0 0 24 24">
+                  <path d="M20.71 7.04c.39-.39.39-1.04 0-1.41l-2.34-2.34c-.37-.39-1.02-.39-1.41 0l-1.84 1.83 3.75 3.75M3 17.25V21h3.75L17.81 9.93l-3.75-3.75L3 17.25z"/>
+                </svg>
+              </button>
+            </div>
           </div>
 
           {/* Category chips */}
@@ -407,6 +535,30 @@ export default function Community() {
               </button>
             ))}
           </div>
+
+          {/* ── Admin Groups ── */}
+          {channels.length > 0 && (
+            <div style={{ borderBottom: `1px solid ${divider}` }}>
+              <p className="px-4 pt-2 pb-1 text-[10px] uppercase font-bold tracking-widest" style={{ color: mutedCol }}>Groups</p>
+              {channels.map(ch => (
+                <button key={ch.post_id} onClick={() => openPost(ch.post_id)}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-black/5"
+                  style={{ background: selected?.post_id === ch.post_id ? (isDark?'rgba(255,255,255,0.04)':'#f5f5f5') : 'transparent' }}>
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center text-2xl flex-shrink-0"
+                    style={{ background: '#075E54' }}>
+                    {ch.channel_emoji || '💬'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-sm truncate" style={{ color: textCol }}>{ch.title}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full text-white font-bold" style={{ background:'#075E54' }}>GROUP</span>
+                    </div>
+                    <span className="text-xs truncate block" style={{ color: mutedCol }}>{ch.reply_count} messages</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Chat list */}
           <div className="flex-1 overflow-y-auto">
@@ -477,6 +629,12 @@ export default function Community() {
                   <p className="text-white font-semibold text-sm truncate">{selected.title}</p>
                   <p className="text-white/65 text-xs">{selected.author_name} · {selected.reply_count} replies</p>
                 </div>
+                {isAdmin && selected.is_channel && (
+                  <button onClick={() => setManageOpen(true)} title="Manage Group"
+                    className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 text-white/80 text-lg">
+                    ⚙️
+                  </button>
+                )}
                 <button onClick={() => likePost(selected.post_id).then(load)}
                   className="flex items-center gap-1 px-3 py-1 rounded-full hover:bg-white/10 text-white/80 text-sm">
                   ❤️ {selected.likes}
@@ -518,7 +676,7 @@ export default function Community() {
                             }
                           </div>
                         )}
-                        <div className={`flex flex-col ${mine?'items-end':'items-start'} max-w-[72%] md:max-w-[58%]`}>
+                        <div className={`flex flex-col ${mine?'items-end':'items-start'} max-w-[72%] md:max-w-[58%] group/msg`}>
                           {showName && (
                             <span className="text-xs font-semibold px-1 mb-0.5" style={{ color:nameColor(msg.author_name) }}>
                               {msg.author_name}
@@ -549,12 +707,27 @@ export default function Community() {
                                 {msg.body}
                               </p>
                             )}
-                            {/* Timestamp */}
+                            {/* Timestamp + admin/owner delete */}
                             <div className="flex items-center justify-end gap-1 mt-0.5 -mb-0.5">
                               <span style={{ fontSize:10, color:timeColor }}>{msgTime(msg.created_at)}</span>
                               {mine && <span style={{ fontSize:12, color: isDark?'#53bdeb':'#4fc3f7' }}>✓✓</span>}
+                              {(isAdmin || mine) && (
+                                <button onClick={() => handleDeleteMsg(msg.reply_id, !!msg.isRoot)}
+                                  className="ml-1 opacity-0 group-hover/msg:opacity-100 transition-opacity text-[10px] leading-none"
+                                  style={{ color: isDark?'rgba(255,255,255,0.4)':'rgba(0,0,0,0.3)' }} title="Delete">
+                                  ✕
+                                </button>
+                              )}
                             </div>
                           </div>
+                          {/* Admin: remove user from channel (non-own messages in channels) */}
+                          {isAdmin && !mine && selected?.is_channel && (
+                            <button onClick={() => handleMuteUser(msg.user_id, msg.author_name)}
+                              className="opacity-0 group-hover/msg:opacity-100 transition-opacity text-[10px] mt-0.5 px-1.5 py-0.5 rounded"
+                              style={{ color:'#e53935', background:'rgba(229,57,53,0.08)' }}>
+                              Remove from group
+                            </button>
+                          )}
                         </div>
                       </div>
                     </React.Fragment>
@@ -630,6 +803,13 @@ export default function Community() {
                 </div>
               )}
 
+              {/* Muted warning */}
+              {selected.muted_users?.includes(user?.id || '') && (
+                <div className="px-4 py-3 flex-shrink-0 text-center text-sm font-medium" style={{ background:'#ff000015', color:'#e53935' }}>
+                  🚫 You have been removed from this group by the admin
+                </div>
+              )}
+
               {/* Input bar */}
               <div className="flex items-end gap-2 px-2 py-2 flex-shrink-0" style={{ background: isDark?'#0b141a':'#f0f2f5' }}>
                 {!recording && (
@@ -656,7 +836,7 @@ export default function Community() {
                       onKeyDown={e => { if (e.key==='Enter'&&!e.shiftKey) { e.preventDefault(); handleSend(); } }}/>
                   </div>
                 )}
-                <button disabled={submitting}
+                <button disabled={submitting || selected.muted_users?.includes(user?.id || '')}
                   className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 text-white shadow-md active:scale-95 disabled:opacity-50"
                   style={{ background:'#128C7E' }}
                   onClick={() => { if (recording){stopRec(true);return;} if(msgText.trim()||pendingMedia){handleSend();return;} startRec(); }}>

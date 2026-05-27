@@ -1,0 +1,209 @@
+# SECURITY FIX — A03: Automated Security Scanning CI/CD Workflow
+#
+# Vulnerability: No automated dependency scanning in CI/CD. The npm audit
+# only ran at client build time — the server had no equivalent. No SBOM
+# was generated. No Dependabot configuration existed.
+#
+# Attack scenario: A critical vulnerability is published in a dependency
+# (e.g., express, jsonwebtoken). Without automated scanning, the team
+# doesn't know until a manual audit is run — potentially weeks later.
+#
+# Risk severity: HIGH (supply chain attacks are a top attack vector)
+#
+# Remediation:
+# 1. Run npm audit on both client and server on every push and PR.
+# 2. Generate CycloneDX SBOM for both packages.
+# 3. Upload SBOM as a build artifact for compliance and auditing.
+# 4. Block merges if critical vulnerabilities are found.
+# 5. Snyk integration for deeper vulnerability analysis.
+#
+# Why secure: Automated scanning catches vulnerabilities before they reach
+# production. SBOM provides a complete inventory of all dependencies for
+# incident response and compliance (NIST SSDF, EO 14028).
+
+name: Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run daily at 02:00 UTC to catch newly published CVEs
+    - cron: '0 2 * * *'
+
+permissions:
+  contents: read
+  security-events: write  # Required for uploading SARIF results
+  actions: read
+
+jobs:
+  # ── Dependency Audit ────────────────────────────────────────────────────────
+  dependency-audit:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
+            functions/package-lock.json
+
+      # SECURITY FIX — A03: Audit server dependencies
+      - name: Audit server dependencies
+        working-directory: server
+        run: |
+          npm ci --ignore-scripts
+          npm audit --audit-level=high --json > ../audit-server.json || true
+          npm audit --audit-level=critical
+        continue-on-error: false
+
+      # SECURITY FIX — A03: Audit client dependencies
+      - name: Audit client dependencies
+        working-directory: client
+        run: |
+          npm ci --ignore-scripts
+          npm audit --audit-level=high --json > ../audit-client.json || true
+          npm audit --audit-level=critical
+        continue-on-error: false
+
+      # SECURITY FIX — A03: Audit functions dependencies
+      - name: Audit functions dependencies
+        working-directory: functions
+        run: |
+          npm ci --ignore-scripts
+          npm audit --audit-level=high --json > ../audit-functions.json || true
+          npm audit --audit-level=critical
+        continue-on-error: false
+
+      - name: Upload audit reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-audit-reports
+          path: |
+            audit-server.json
+            audit-client.json
+            audit-functions.json
+          retention-days: 30
+
+  # ── SBOM Generation ─────────────────────────────────────────────────────────
+  sbom:
+    name: Generate SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    needs: dependency-audit
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # SECURITY FIX — A03: Generate CycloneDX SBOM for server
+      - name: Install CycloneDX CLI
+        run: npm install -g @cyclonedx/cyclonedx-npm
+
+      - name: Generate SBOM for server
+        working-directory: server
+        run: |
+          npm ci --ignore-scripts
+          cyclonedx-npm --output-format json --output-file ../sbom-server.json
+        continue-on-error: true
+
+      - name: Generate SBOM for client
+        working-directory: client
+        run: |
+          npm ci --ignore-scripts
+          cyclonedx-npm --output-format json --output-file ../sbom-client.json
+        continue-on-error: true
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: |
+            sbom-server.json
+            sbom-client.json
+          retention-days: 90  # Keep SBOMs for 90 days for compliance
+
+  # ── Snyk Security Analysis ──────────────────────────────────────────────────
+  snyk:
+    name: Snyk Vulnerability Analysis
+    runs-on: ubuntu-latest
+    # Only run Snyk if the secret is configured
+    if: ${{ secrets.SNYK_TOKEN != '' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+
+      # SECURITY FIX — A03: Snyk analysis for server
+      - name: Snyk test server
+        working-directory: server
+        run: |
+          npm ci --ignore-scripts
+          snyk test --severity-threshold=high --json > ../snyk-server.json || true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
+
+      # SECURITY FIX — A03: Snyk analysis for client
+      - name: Snyk test client
+        working-directory: client
+        run: |
+          npm ci --ignore-scripts
+          snyk test --severity-threshold=high --json > ../snyk-client.json || true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
+
+      - name: Upload Snyk reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: snyk-reports
+          path: |
+            snyk-server.json
+            snyk-client.json
+          retention-days: 30
+
+  # ── CodeQL Static Analysis ──────────────────────────────────────────────────
+  codeql:
+    name: CodeQL Static Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript, typescript
+          queries: security-extended
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:javascript'

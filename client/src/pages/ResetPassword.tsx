@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { confirmPasswordReset } from 'firebase/auth';
 import { auth } from '../firebase';
+import { isStrongPassword } from '../utils';
 
 export default function ResetPassword() {
   const navigate = useNavigate();
@@ -32,7 +33,7 @@ export default function ResetPassword() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
+    if (!isStrongPassword(password)) { setError('Password must be at least 8 characters with uppercase, lowercase and a number.'); return; }
     if (password !== password2) { setError('Passwords do not match.'); return; }
     setLoading(true);
     try {

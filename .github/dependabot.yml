@@ -1,0 +1,79 @@
+# SECURITY FIX — A03: Dependabot Configuration
+#
+# Vulnerability: No automated dependency update scanning. Vulnerable packages
+# could remain in the codebase indefinitely without manual intervention.
+#
+# Remediation: Dependabot automatically opens PRs when security vulnerabilities
+# are published for any dependency in the project. Weekly version updates
+# keep dependencies current and reduce the attack surface.
+#
+# Why secure: Automated dependency updates ensure that known CVEs are patched
+# quickly. Grouping updates reduces PR noise while maintaining security coverage.
+
+version: 2
+updates:
+  # ── Server (Node.js) ────────────────────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /server
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "Africa/Johannesburg"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "security"
+    groups:
+      # Group minor/patch updates to reduce PR noise
+      production-dependencies:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+    # Always open individual PRs for major updates (breaking changes)
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # ── Client (React/Vite) ─────────────────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /client
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "Africa/Johannesburg"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "security"
+    groups:
+      production-dependencies:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+
+  # ── Firebase Functions ──────────────────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /functions
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "Africa/Johannesburg"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "security"
+
+  # ── GitHub Actions ──────────────────────────────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - "dependencies"
+      - "github-actions"

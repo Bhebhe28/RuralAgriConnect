@@ -101,14 +101,14 @@ const en = {
 
   // Chatbot
   chatTitle: '🤖 AI Farm Assistant',
-  chatSubtitle: 'Powered by Google Gemini — chat or upload a crop photo for instant diagnosis',
-  chatGreeting: "Hello! I'm your AI farm advisor powered by Gemini. Ask me anything — or upload a photo of your crop/plant for instant disease and pest diagnosis! 📸",
+  chatSubtitle: 'Powered by RuralAgriConnect — chat or upload a crop photo for instant diagnosis',
+  chatGreeting: "Hello! I'm Mr Mgabhi's AI farm advisor from RuralAgriConnect. Ask me anything — or upload a photo of your crop/plant for instant disease and pest diagnosis! 📸",
   chatPlaceholder: 'Ask about crops, pests, soil, weather…',
   chatImagePlaceholder: 'Describe what you want to know (optional)…',
   chatSend: 'Send',
   chatScan: '🔍 Scan',
   chatImageReady: '📸 Image ready for analysis',
-  chatImageHint: '📸 Upload a photo of a diseased plant, pest damage, or soil — Gemini will diagnose it',
+  chatImageHint: '📸 Upload a photo of a diseased plant, pest damage, or soil — RuralAgriConnect AI will diagnose it',
   chatOfflineError: "Couldn't connect. Please check your connection.",
   chatImageError: 'Sorry, image analysis failed. Please try again.',
   chatSuggestion1: 'What crops should I plant this season in KZN?',

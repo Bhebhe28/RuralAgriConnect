@@ -103,14 +103,14 @@ const zu: Translations = {
 
   // Chatbot
   chatTitle: '🤖 Umsizi we-AI Wepulazi',
-  chatSubtitle: 'Ixhaswa yi-Google Gemini — khuluma noma layisha isithombe sesitshalo ukuze uthole ukuxilongwa ngokushesha',
-  chatGreeting: 'Sawubona! Ngingumsizi wakho we-AI wepulazi oxhaswa yi-Gemini. Buza noma yini — noma layisha isithombe sesitshalo/isihlahla ukuze uthole ukuxilongwa kwesifo noma izinambuzane ngokushesha! 📸',
+  chatSubtitle: 'Ixhaswa yi-RuralAgriConnect — khuluma noma layisha isithombe sesitshalo ukuze uthole ukuxilongwa ngokushesha',
+  chatGreeting: 'Sawubona! NginguMr Mgabhi we-AI wepulazi we-RuralAgriConnect. Buza noma yini — noma layisha isithombe sesitshalo/isihlahla ukuze uthole ukuxilongwa kwesifo noma izinambuzane ngokushesha! 📸',
   chatPlaceholder: 'Buza ngezitshalo, izinambuzane, umhlabathi, isimo sezulu…',
   chatImagePlaceholder: 'Chaza lokho ofuna ukukwazi (akudingekile)…',
   chatSend: 'Thumela',
   chatScan: '🔍 Hlola',
   chatImageReady: '📸 Isithombe silungele ukuhlaziywa',
-  chatImageHint: '📸 Layisha isithombe sesitshalo esinosifo, umonakalo wezinambuzane, noma umhlabathi — i-Gemini izoxilonga',
+  chatImageHint: '📸 Layisha isithombe sesitshalo esinosifo, umonakalo wezinambuzane, noma umhlabathi — i-RuralAgriConnect AI izoxilonga',
   chatOfflineError: 'Ayikwazanga ukuxhuma. Sicela uhlole uxhumano lwakho.',
   chatImageError: 'Uxolo, ukuhlaziywa kwesithombe kuhlulekile. Sicela uzame futhi.',
   chatSuggestion1: 'Ngizitshala ziphi izitshalo lesi sikhathi eKZN?',

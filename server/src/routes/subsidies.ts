@@ -47,9 +47,14 @@ router.put('/:id/review', authenticate, requireAdmin, async (req: AuthRequest, r
   run(db, `UPDATE subsidy_requests SET status=?, reviewed_by=?, review_notes=?, updated_at=? WHERE request_id=?`,
     [status, req.user!.id, review_notes || null, now, req.params.id]);
 
-  // Notify farmer
-  const requests = query<any>(db, `SELECT farmer_id FROM subsidy_requests WHERE request_id = ?`, [req.params.id]);
+  // A09: Log subsidy review action for audit trail
+  const requests = query<any>(db, `SELECT farmer_id, resource_type, quantity FROM subsidy_requests WHERE request_id = ?`, [req.params.id]);
   if (requests.length) {
+    run(db, `INSERT INTO activity_logs (log_id, user_id, action, entity_type, entity_id, details) VALUES (?,?,?,?,?,?)`,
+      [uuidv4(), req.user!.id, 'REVIEW_SUBSIDY', 'subsidy_request', req.params.id,
+       `${status.toUpperCase()}: ${requests[0].resource_type} (${requests[0].quantity}) — ${review_notes || 'no notes'}`]);
+
+    // Notify farmer
     run(db, `INSERT INTO notifications (notif_id, user_id, title, message, channel, status, read, created_at) VALUES (?,?,?,?,?,?,?,?)`,
       [uuidv4(), requests[0].farmer_id,
        `Subsidy Request ${status}`,
