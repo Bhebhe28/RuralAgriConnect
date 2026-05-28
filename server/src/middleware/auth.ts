@@ -264,6 +264,69 @@ export async function authenticate(req: AuthRequest, res: Response, next: NextFu
   }
 }
 
+// ── Optional authentication middleware ────────────────────────────────────────
+/**
+ * SECURITY FIX — A09: Optional authentication for security-log endpoint.
+ * Attempts to authenticate but does not fail if no token is provided.
+ * This allows logging during login/register when no token exists yet.
+ */
+export async function authenticateOptional(req: AuthRequest, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    // No token provided — continue without authentication
+    return next();
+  }
+
+  const token = authHeader.split(' ')[1];
+  if (!token) {
+    // Empty token — continue without authentication
+    return next();
+  }
+
+  // ── Try Firebase ID token first (client uses Firebase Auth) ──
+  try {
+    const fa = getFirebaseAdmin();
+    const decoded = await fa.auth().verifyIdToken(token);
+
+    // Look up role from DB (Firebase token doesn't carry role)
+    const { getDb, query } = await import('../db/database');
+    const db = await getDb();
+    const users = query<any>(db, `SELECT role FROM users WHERE user_id = ?`, [decoded.uid]);
+    const role = users[0]?.role || 'farmer';
+
+    req.user = { id: decoded.uid, role, email: decoded.email || '' };
+    return next();
+  } catch (firebaseErr: any) {
+    // Not a Firebase token — fall through to custom JWT check
+    if (!firebaseErr.code?.startsWith('auth/')) {
+      logger.warn('Firebase token verification error', { error: firebaseErr.message });
+    }
+  }
+
+  // ── Fall back to custom JWT (server-issued tokens) ────────────
+  try {
+    const decoded = jwt.verify(token, getJwtSecret()) as {
+      id: string; role: string; email: string; jti?: string;
+    };
+
+    if ((decoded as any).mfa_pending) {
+      // MFA pending — don't authenticate, but continue (log will have no user_id)
+      return next();
+    }
+
+    if (decoded.jti && isTokenBlacklisted(decoded.jti)) {
+      // Token blacklisted — don't authenticate, but continue (log will have no user_id)
+      return next();
+    }
+
+    req.user = decoded;
+    return next();
+  } catch (err: any) {
+    // Invalid token — don't authenticate, but continue (log will have no user_id)
+    return next();
+  }
+}
+
 // ── Admin authorization middleware ────────────────────────────────────────────
 export function requireAdmin(req: AuthRequest, res: Response, next: NextFunction) {
   if (req.user?.role !== 'admin') {

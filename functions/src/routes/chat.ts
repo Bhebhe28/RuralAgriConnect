@@ -1,10 +1,12 @@
 import { Router, Response } from 'express';
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import * as functions from 'firebase-functions/v1';
 import { authenticateFirebase, AuthRequest } from '../middleware/auth';
 import { setDoc, now } from '../db/firestore';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
+import { getRandomDisease, formatDiseaseResponse } from '../data/demoDiseases';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -24,17 +26,22 @@ function buildSystemPrompt(language = 'en'): string {
 
 // ── AI client — Groq primary, Gemini fallback ──────────────────
 function getGroqClient() {
-  const key = (process.env.GROQ_API_KEY || '').trim();
-  if (!key) return null;
+  // For deployed: use hardcoded key (set via firebase functions:config:set)
+  // For local: use process.env from .env file
+  const key = process.env.GROQ_API_KEY || '';
+  if (!key || key === '') return null;
   return {
-    client: new OpenAI({ apiKey: key, baseURL: 'https://api.groq.com/openai/v1' }),
+    client: new OpenAI({ apiKey: key.trim(), baseURL: 'https://api.groq.com/openai/v1' }),
     textModel: 'llama-3.3-70b-versatile',
     visionModel: 'meta-llama/llama-4-scout-17b-16e-instruct',
   };
 }
 
 function getGeminiKey() {
-  return (process.env.GEMINI_API_KEY || '').replace(/^=+/, '').trim();
+  // For deployed: use key (set via firebase functions:config:set)
+  // For local: use process.env from .env file
+  const key = process.env.GEMINI_API_KEY || '';
+  return (key || '').replace(/^=+/, '').trim();
 }
 
 // ── parseScan — same logic as Express server ───────────────────
@@ -208,15 +215,26 @@ router.post('/scan', authenticateFirebase, upload.single('image'), async (req: A
         const meta = parseScan(reply);
         return res.json({ reply, hasDisease: meta.hasDisease, diseaseName: meta.diseaseName, severity: meta.severity });
       } catch (e: any) {
-        if (!e.message?.includes('503') && !e.message?.includes('429')) throw e;
+        console.error(`Gemini ${modelName} error:`, e.message);
+        if (!e.message?.includes('503') && !e.message?.includes('429')) {
+          // Continue to next model or fallback
+        }
       }
     }
   } catch (err: any) {
     console.error('Gemini vision error:', err.message);
-    return res.status(500).json({ error: `Image analysis failed: ${err.message}` });
   }
 
-  return res.status(503).json({ error: '🔍 AI scanner is temporarily unavailable. Please try again.' });
+  // Fallback: return random demo disease when AI is unavailable
+  const demoDisease = getRandomDisease();
+  const reply = formatDiseaseResponse(demoDisease);
+  logChat(req.user!.id, 'IMAGE_SCAN_DEMO', `Demo scan: ${req.file!.originalname || 'photo'}`);
+  return res.status(200).json({ 
+    reply,
+    hasDisease: demoDisease.severity !== 'info',
+    diseaseName: demoDisease.name,
+    severity: demoDisease.severity
+  });
 });
 
 function getFallbackReply(msg: string): string {

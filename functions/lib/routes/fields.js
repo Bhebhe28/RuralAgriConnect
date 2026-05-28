@@ -37,6 +37,11 @@ router.post('/', auth_1.authenticate, async (req, res) => {
     res.status(201).json({ id, message: 'Field registered' });
 });
 router.put('/:id', auth_1.authenticate, async (req, res) => {
+    const field = await (0, firestore_1.getDoc)('farm_fields', req.params.id);
+    if (!field)
+        return res.status(404).json({ error: 'Field not found' });
+    if (field.farmer_id !== req.user.id && req.user.role !== 'admin')
+        return res.status(403).json({ error: 'Not allowed' });
     const { field_name, crop_type, area_hectares, gps_lat, gps_lng, soil_type, irrigation, notes } = req.body;
     await (0, firestore_1.updateDoc)('farm_fields', req.params.id, {
         field_name, crop_type, area_hectares: parseFloat(area_hectares),
@@ -47,7 +52,17 @@ router.put('/:id', auth_1.authenticate, async (req, res) => {
     res.json({ message: 'Field updated' });
 });
 router.delete('/:id', auth_1.authenticate, async (req, res) => {
+    const field = await (0, firestore_1.getDoc)('farm_fields', req.params.id);
+    if (!field)
+        return res.status(404).json({ error: 'Field not found' });
+    if (field.farmer_id !== req.user.id && req.user.role !== 'admin')
+        return res.status(403).json({ error: 'Not allowed' });
     await (0, firestore_1.deleteDoc)('farm_fields', req.params.id);
+    await (0, firestore_1.setDoc)('activity_logs', require('uuid').v4(), {
+        user_id: req.user.id, action: 'DELETE_FIELD',
+        entity_type: 'farm_field', entity_id: req.params.id,
+        details: `Deleted field: ${field.field_name}`, created_at: (0, firestore_1.now)(),
+    });
     res.json({ message: 'Field deleted' });
 });
 exports.default = router;

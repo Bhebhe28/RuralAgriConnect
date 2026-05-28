@@ -7,6 +7,7 @@ const express_1 = require("express");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const uuid_1 = require("uuid");
+const crypto_1 = __importDefault(require("crypto"));
 const firestore_1 = require("../db/firestore");
 const utils_1 = require("../utils");
 const emailService_1 = require("../services/emailService");
@@ -15,12 +16,26 @@ router.post('/login', async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password)
         return res.status(400).json({ error: 'Email and password required' });
+    if (typeof email !== 'string' || email.length > 254)
+        return res.status(400).json({ error: 'Invalid email' });
+    if (typeof password !== 'string' || password.length > 128)
+        return res.status(400).json({ error: 'Invalid password' });
     const users = await (0, firestore_1.getDocs)('users', [['email', '==', email]]);
     const user = users[0];
     if (!user || !bcryptjs_1.default.compareSync(password, user.password_hash)) {
+        // Log failed attempt (don't reveal whether email exists)
+        await (0, firestore_1.setDoc)('activity_logs', (0, uuid_1.v4)(), {
+            user_id: null, action: 'LOGIN_FAILED',
+            entity_type: 'auth', entity_id: null,
+            details: `Failed login attempt for: ${email}`,
+            created_at: (0, firestore_1.now)(),
+        });
         return res.status(401).json({ error: 'Invalid credentials' });
     }
-    const token = jsonwebtoken_1.default.sign({ id: user.id, role: user.role || 'farmer', email: user.email }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret)
+        return res.status(500).json({ error: 'Server configuration error' });
+    const token = jsonwebtoken_1.default.sign({ id: user.id, role: user.role || 'farmer', email: user.email }, jwtSecret, { expiresIn: '7d' });
     res.json({
         token,
         user: {
@@ -34,17 +49,25 @@ router.post('/login', async (req, res) => {
     });
 });
 router.post('/register', async (req, res) => {
-    const { name, email, phone, password, role, region } = req.body;
+    const { name, email, phone, password, region } = req.body;
     if (!name || !email || !password)
         return res.status(400).json({ error: 'Name, email and password required' });
+    if (typeof name !== 'string' || name.trim().length < 2 || name.length > 100)
+        return res.status(400).json({ error: 'Name must be 2–100 characters' });
+    if (typeof email !== 'string' || email.length > 254)
+        return res.status(400).json({ error: 'Invalid email format' });
     if (!(0, utils_1.isValidEmail)(email))
         return res.status(400).json({ error: 'Invalid email format' });
+    if (typeof password !== 'string' || password.length > 128)
+        return res.status(400).json({ error: 'Invalid password length' });
     if (!(0, utils_1.isStrongPassword)(password))
         return res.status(400).json({ error: 'Password must be 8+ characters with uppercase, lowercase and a number' });
+    if (phone && (typeof phone !== 'string' || phone.length > 20))
+        return res.status(400).json({ error: 'Invalid phone number' });
     const existing = await (0, firestore_1.getDocs)('users', [['email', '==', email]]);
     if (existing.length > 0)
         return res.status(409).json({ error: 'Email already registered' });
-    const roleName = role || 'farmer';
+    const roleName = 'farmer'; // Always 'farmer'; admins are assigned only via admin panel
     const userId = (0, uuid_1.v4)();
     await (0, firestore_1.setDoc)('users', userId, {
         full_name: name,
@@ -72,10 +95,13 @@ router.post('/forgot-password', async (req, res) => {
     const { email } = req.body;
     if (!email)
         return res.status(400).json({ error: 'Email required' });
+    if (typeof email !== 'string' || email.length > 254)
+        return res.status(400).json({ error: 'Invalid email' });
     const users = await (0, firestore_1.getDocs)('users', [['email', '==', email]]);
     if (!users.length)
         return res.json({ message: 'If that email exists, a reset link has been sent.' });
-    const token = (0, uuid_1.v4)();
+    // A07: Use cryptographically random token — not UUID (which is not a CSPRNG)
+    const token = crypto_1.default.randomBytes(32).toString('hex');
     const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     await (0, firestore_1.setDoc)('password_resets', token, {
         user_id: users[0].id,

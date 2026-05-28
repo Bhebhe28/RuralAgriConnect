@@ -25,7 +25,7 @@ import { fetchAndSaveWeather } from './services/weatherService';
 import { logger, requestLogger } from './middleware/logger';
 import { globalErrorHandler, notFoundHandler, asyncHandler } from './middleware/errorHandler';
 import { globalLimiter, authLimiter, chatLimiter, communityWriteLimiter, adminLimiter } from './middleware/rateLimiter';
-import { authenticate, AuthRequest } from './middleware/auth';
+import { authenticate, authenticateOptional, AuthRequest } from './middleware/auth';
 import { validate, SecurityLogSchema } from './middleware/validate';
 
 import authRoutes         from './routes/auth';
@@ -195,8 +195,9 @@ async function bootstrap() {
    * SECURITY FIX — A09: Client-side security event sink.
    * Receives auth events from the frontend logger and writes them to the
    * server audit log. Validated with Zod schema to prevent log injection.
+   * Authentication is optional — allows logging during login/register.
    */
-  app.post('/api/security-log', authenticate, validate(SecurityLogSchema),
+  app.post('/api/security-log', authenticateOptional, validate(SecurityLogSchema),
     asyncHandler(async (req: AuthRequest, res) => {
       const { action, detail, timestamp, userAgent } = req.body;
       const db = await getDb();
@@ -214,7 +215,7 @@ async function bootstrap() {
       res.json({ ok: true });
     })
   );
-  app.post('/api/v1/security-log', authenticate, validate(SecurityLogSchema),
+  app.post('/api/v1/security-log', authenticateOptional, validate(SecurityLogSchema),
     asyncHandler(async (req: AuthRequest, res) => {
       const { action, detail, timestamp, userAgent } = req.body;
       const db = await getDb();

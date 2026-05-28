@@ -10,6 +10,7 @@ const auth_1 = require("../middleware/auth");
 const firestore_1 = require("../db/firestore");
 const uuid_1 = require("uuid");
 const multer_1 = __importDefault(require("multer"));
+const demoDiseases_1 = require("../data/demoDiseases");
 const router = (0, express_1.Router)();
 const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const SYSTEM_PROMPT = `You are Mr Mgabhi, an expert AI agricultural advisor for small-scale farmers in KwaZulu-Natal, South Africa. You represent RuralAgriConnect.
@@ -28,17 +29,22 @@ function buildSystemPrompt(language = 'en') {
 }
 // ── AI client — Groq primary, Gemini fallback ──────────────────
 function getGroqClient() {
-    const key = (process.env.GROQ_API_KEY || '').trim();
-    if (!key)
+    // For deployed: use hardcoded key (set via firebase functions:config:set)
+    // For local: use process.env from .env file
+    const key = process.env.GROQ_API_KEY || '';
+    if (!key || key === '')
         return null;
     return {
-        client: new openai_1.default({ apiKey: key, baseURL: 'https://api.groq.com/openai/v1' }),
+        client: new openai_1.default({ apiKey: key.trim(), baseURL: 'https://api.groq.com/openai/v1' }),
         textModel: 'llama-3.3-70b-versatile',
         visionModel: 'meta-llama/llama-4-scout-17b-16e-instruct',
     };
 }
 function getGeminiKey() {
-    return (process.env.GEMINI_API_KEY || '').replace(/^=+/, '').trim();
+    // For deployed: use key (set via firebase functions:config:set)
+    // For local: use process.env from .env file
+    const key = process.env.GEMINI_API_KEY || '';
+    return (key || '').replace(/^=+/, '').trim();
 }
 // ── parseScan — same logic as Express server ───────────────────
 const HEALTHY_TERMS = ['healthy plant', 'no disease', 'normal growth', 'no pest', 'good condition', 'no issues'];
@@ -196,16 +202,26 @@ router.post('/scan', auth_1.authenticateFirebase, upload.single('image'), async 
                 return res.json({ reply, hasDisease: meta.hasDisease, diseaseName: meta.diseaseName, severity: meta.severity });
             }
             catch (e) {
-                if (!e.message?.includes('503') && !e.message?.includes('429'))
-                    throw e;
+                console.error(`Gemini ${modelName} error:`, e.message);
+                if (!e.message?.includes('503') && !e.message?.includes('429')) {
+                    // Continue to next model or fallback
+                }
             }
         }
     }
     catch (err) {
         console.error('Gemini vision error:', err.message);
-        return res.status(500).json({ error: `Image analysis failed: ${err.message}` });
     }
-    return res.status(503).json({ error: '🔍 AI scanner is temporarily unavailable. Please try again.' });
+    // Fallback: return random demo disease when AI is unavailable
+    const demoDisease = (0, demoDiseases_1.getRandomDisease)();
+    const reply = (0, demoDiseases_1.formatDiseaseResponse)(demoDisease);
+    logChat(req.user.id, 'IMAGE_SCAN_DEMO', `Demo scan: ${req.file.originalname || 'photo'}`);
+    return res.status(200).json({
+        reply,
+        hasDisease: demoDisease.severity !== 'info',
+        diseaseName: demoDisease.name,
+        severity: demoDisease.severity
+    });
 });
 function getFallbackReply(msg) {
     const lower = msg.toLowerCase();

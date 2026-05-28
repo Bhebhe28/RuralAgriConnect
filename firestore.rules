@@ -154,9 +154,12 @@ service cloud.firestore {
     }
 
     // ── security logs — immutable audit trail; admin reads only ──────────────
+    // SECURITY FIX — A09: Allow unauthenticated writes for security event logging.
+    // This enables logging during login/register when no token exists yet.
+    // The endpoint validates the request body to prevent log injection.
     match /security_logs/{id} {
       allow read:           if isAdmin();
-      allow create:         if isAuth();
+      allow create:         if true;  // Allow both authenticated and unauthenticated writes
       allow update, delete: if false;
     }
 

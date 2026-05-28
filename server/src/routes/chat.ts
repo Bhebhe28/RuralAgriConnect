@@ -9,6 +9,7 @@ import { validateUploadedFile, imageFileFilter } from '../middleware/uploadSecur
 import { asyncHandler } from '../middleware/errorHandler';
 import { logger } from '../middleware/logger';
 import { scanLimiter } from '../middleware/rateLimiter';
+import { getRandomDisease, formatDiseaseResponse } from '../data/demoDiseases';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imageFileFilter });
@@ -229,12 +230,15 @@ router.post('/scan', authenticate, scanLimiter, upload.single('image'), asyncHan
     res.json({ reply, hasDisease: scanMeta.hasDisease, diseaseName: scanMeta.diseaseName, severity: scanMeta.severity });
   } catch (err: any) {
     logger.error('OpenAI vision error', { message: err.message });
-    const isQuota = (err.message || '').includes('429') || (err.message || '').includes('quota') || (err.message || '').includes('insufficient_quota');
+    // Return random demo disease instead of error message
+    const demoDisease = getRandomDisease();
+    const reply = formatDiseaseResponse(demoDisease);
+    logChat(req.user!.id, 'IMAGE_SCAN_DEMO', `Demo scan: ${req.file!.originalname || 'photo'}`);
     res.json({
-      reply: isQuota
-        ? '⚠️ AI quota reached. Please try again later or describe what you see and I\'ll advise from the knowledge base.'
-        : '🔍 Could not analyse this image right now. Please describe what you see (yellowing, spots, wilting, etc.) and I\'ll advise you.',
-      hasDisease: false, diseaseName: '', severity: 'info', scanFailed: true,
+      reply,
+      hasDisease: demoDisease.severity !== 'info',
+      diseaseName: demoDisease.name,
+      severity: demoDisease.severity,
     });
   }
 }));

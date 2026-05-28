@@ -44,6 +44,10 @@ const multer_1 = __importDefault(require("multer"));
 const admin = __importStar(require("firebase-admin"));
 const router = (0, express_1.Router)();
 const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+// Strip all HTML tags and trim — prevents stored XSS
+const sanitize = (s) => s.replace(/<[^>]*>/g, '').replace(/javascript:/gi, '').trim();
+const ALLOWED_CATEGORIES = ['general', 'disease', 'weather', 'market', 'equipment', 'soil'];
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 async function uploadImage(buffer, mimetype, folder) {
     const bucket = admin.storage().bucket();
     const fileName = `${folder}/${Date.now()}-${(0, uuid_1.v4)()}`;
@@ -64,25 +68,36 @@ router.get('/:id', auth_1.authenticate, async (req, res) => {
     res.json({ ...post, replies });
 });
 router.post('/', auth_1.authenticate, upload.single('image'), async (req, res) => {
-    const { title, body, category } = req.body;
+    const title = sanitize(req.body.title || '');
+    const body = sanitize(req.body.body || '');
+    const category = ALLOWED_CATEGORIES.includes(req.body.category) ? req.body.category : 'general';
     if (!title || !body)
         return res.status(400).json({ error: 'title and body are required' });
+    if (title.length > 200)
+        return res.status(400).json({ error: 'Title too long (max 200 chars)' });
+    if (body.length > 2000)
+        return res.status(400).json({ error: 'Body too long (max 2000 chars)' });
+    if (req.file && !ALLOWED_IMAGE_TYPES.includes(req.file.mimetype))
+        return res.status(400).json({ error: 'Only JPEG, PNG, WebP and GIF images are allowed' });
     let imageUrl = null;
     if (req.file)
         imageUrl = await uploadImage(req.file.buffer, req.file.mimetype, 'community');
     const id = (0, uuid_1.v4)();
     await (0, firestore_1.setDoc)('community_posts', id, {
-        user_id: req.user.id, title, body,
-        category: category || 'general',
+        user_id: req.user.id, title, body, category,
         image_url: imageUrl, likes: 0,
         created_at: (0, firestore_1.now)(), updated_at: (0, firestore_1.now)(),
     });
     res.status(201).json({ id, message: 'Post created', image_url: imageUrl });
 });
 router.post('/:id/replies', auth_1.authenticate, upload.single('image'), async (req, res) => {
-    const { body } = req.body;
+    const body = sanitize(req.body.body || '');
     if (!body)
         return res.status(400).json({ error: 'body is required' });
+    if (body.length > 1000)
+        return res.status(400).json({ error: 'Reply too long (max 1000 chars)' });
+    if (req.file && !ALLOWED_IMAGE_TYPES.includes(req.file.mimetype))
+        return res.status(400).json({ error: 'Only JPEG, PNG, WebP and GIF images are allowed' });
     let imageUrl = null;
     if (req.file)
         imageUrl = await uploadImage(req.file.buffer, req.file.mimetype, 'community');

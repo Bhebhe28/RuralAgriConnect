@@ -104,9 +104,9 @@ async function verifyOfflineCreds(email: string, password: string): Promise<bool
   } catch { return false; }
 }
 
-// A07: 5-minute idle session timeout (PCI DSS 8.1.8 — max 15 min; 5 min is stricter)
-const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
-const IDLE_WARNING_MS = IDLE_TIMEOUT_MS - 30_000; // warn 30 s before lock
+// A07: 20-second idle session timeout (for testing)
+const IDLE_TIMEOUT_MS = 10*  5 * 1000;
+const IDLE_WARNING_MS = IDLE_TIMEOUT_MS - 5_000; // warn 5 s before lock
 const IDLE_EVENTS     = ['mousedown', 'keydown', 'touchstart', 'scroll'] as const;
 
 // ════════════════════════════════════════════════════════════════
@@ -205,6 +205,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSessionActive(true);
       await signInWithEmailAndPassword(auth, email, password);
       await saveOfflineCreds(email, password);
+      // Fetch custom JWT so all API calls use the same token type as localhost
+      try {
+        const r = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        if (r.ok) {
+          const { token } = await r.json();
+          if (token) localStorage.setItem('token', token);
+        }
+      } catch { /* non-critical — API will fall back to Firebase token */ }
       setLocked(false);
       logger.auth('Signed in', email);
     } catch (err: any) {
@@ -285,6 +297,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Lock the session — clears React state but keeps Firebase Auth alive.
     // Firestore retains a valid auth token so data stays synced offline.
     // The farmer can re-login offline using the cached password hash.
+    localStorage.removeItem('token');
     setLocked(true);
     setSessionActive(false);
     setUser(null);

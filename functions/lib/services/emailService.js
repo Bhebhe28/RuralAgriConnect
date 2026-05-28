@@ -12,9 +12,16 @@ const transporter = nodemailer_1.default.createTransport({
         pass: process.env.EMAIL_PASS, // Gmail App Password
     },
 });
+// Allowlist of domains we will ever embed in emails — prevents SSRF via APP_URL tampering
+const ALLOWED_DOMAINS = [
+    'https://ruralagriconnect-15c7c.web.app',
+    'https://ruralagriconnect-15c7c.firebaseapp.com',
+];
+const FALLBACK_URL = ALLOWED_DOMAINS[0];
 async function sendPasswordResetEmail(to, resetToken) {
-    const baseUrl = process.env.APP_URL || 'https://ruralagriconnect-15c7c.web.app';
-    const resetUrl = `${baseUrl}/reset-password?token=${resetToken}`;
+    const envUrl = (process.env.APP_URL || '').replace(/\/$/, '');
+    const baseUrl = ALLOWED_DOMAINS.includes(envUrl) ? envUrl : FALLBACK_URL;
+    const resetUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(resetToken)}`;
     await transporter.sendMail({
         from: `"RuralAgriConnect" <${process.env.EMAIL_USER}>`,
         to,

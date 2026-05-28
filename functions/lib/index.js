@@ -43,9 +43,23 @@ const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));
 const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
-// Init Firebase Admin
+const dotenv_1 = __importDefault(require("dotenv"));
+// Load environment variables from .env file (for local development)
+dotenv_1.default.config();
+// For deployed Cloud Functions, Firebase config is loaded automatically
+// and merged with process.env by the Firebase runtime
+// The .env file won't be deployed, so we rely on firebase functions:config:set
+// Helper to safely get IP address for rate limiting (handles IPv6)
+function getClientIp(req) {
+    return req.headers['x-forwarded-for']?.split(',')[0].trim() ||
+        req.socket?.remoteAddress ||
+        req.ip ||
+        'unknown';
+}
+// Init Firebase Admin — use projectId only, matching the local server pattern.
+// This uses public-key verification for ID tokens without requiring service account credentials.
 if (!admin.apps.length) {
-    admin.initializeApp();
+    admin.initializeApp({ projectId: 'ruralagriconnect-15c7c' });
 }
 const auth_1 = __importDefault(require("./routes/auth"));
 const advisories_1 = __importDefault(require("./routes/advisories"));
@@ -89,50 +103,65 @@ const ALLOWED_ORIGINS = process.env.NODE_ENV === 'production'
     : [...PROD_ORIGINS, 'http://localhost:5173', 'http://localhost:4173'];
 app.use((0, cors_1.default)({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(express_1.default.json({ limit: '10mb' }));
+// Debug middleware - log all requests
+app.use((req, res, next) => {
+    console.log(`[DEBUG] ${req.method} ${req.path}`);
+    next();
+});
 // A07: Auth rate limiter — 10 attempts per 15 min
 const authLimiter = (0, express_rate_limit_1.default)({
     windowMs: 15 * 60 * 1000, max: 10,
     message: { error: 'Too many attempts, please try again in 15 minutes.' },
     standardHeaders: true, legacyHeaders: false,
+    keyGenerator: (req) => getClientIp(req),
+    skip: (req) => false,
 });
 // A07: Stricter limit for password reset — prevents email bombing
 const resetLimiter = (0, express_rate_limit_1.default)({
     windowMs: 60 * 60 * 1000, max: 5,
     message: { error: 'Too many reset requests, please try again in 1 hour.' },
     standardHeaders: true, legacyHeaders: false,
+    keyGenerator: (req) => getClientIp(req),
+    skip: (req) => false,
 });
-// A04: Rate limit AI endpoints — prevents Gemini quota exhaustion per user
+// A04: Rate limit AI endpoints — prevents quota exhaustion per user
 const chatLimiter = (0, express_rate_limit_1.default)({
     windowMs: 60 * 1000, max: 20,
     message: { error: 'Too many AI requests. Please wait a minute before trying again.' },
     standardHeaders: true, legacyHeaders: false,
-    keyGenerator: (req) => req.user?.id || req.ip,
+    keyGenerator: (req) => getClientIp(req),
+    skip: (req) => false,
 });
 // A04: Rate limit community writes — prevents spam
 const communityWriteLimiter = (0, express_rate_limit_1.default)({
     windowMs: 60 * 1000, max: 10,
     message: { error: 'Too many posts. Please slow down.' },
     standardHeaders: true, legacyHeaders: false,
+    keyGenerator: (req) => getClientIp(req),
+    skip: (req) => false,
 });
 app.use('/auth/forgot-password', resetLimiter);
 app.use('/auth/reset-password', resetLimiter);
-app.use('/auth', authLimiter, auth_1.default);
-app.use('/advisories', advisories_1.default);
-app.use('/weather', weather_1.default);
-app.use('/users', users_1.default);
-app.use('/notifications', notifications_1.default);
-app.use('/sync', sync_1.default);
-app.use('/chat', chatLimiter, chat_1.default);
-app.use('/outbreaks', outbreaks_1.default);
-app.use('/community', communityWriteLimiter, community_1.default);
-app.use('/yields', yields_1.default);
-app.use('/subsidies', subsidies_1.default);
-app.use('/calendar', calendar_1.default);
-app.use('/fields', fields_1.default);
-app.use('/analytics', analytics_1.default);
-app.use('/security-log', securityLog_1.default);
+app.use('/api/auth', authLimiter, auth_1.default);
+app.use('/api/advisories', advisories_1.default);
+app.use('/api/weather', weather_1.default);
+app.use('/api/users', users_1.default);
+app.use('/api/notifications', notifications_1.default);
+app.use('/api/sync', sync_1.default);
+app.use('/api/chat', chatLimiter, chat_1.default);
+app.use('/api/outbreaks', outbreaks_1.default);
+app.use('/api/community', communityWriteLimiter, community_1.default);
+app.use('/api/yields', yields_1.default);
+app.use('/api/subsidies', subsidies_1.default);
+app.use('/api/calendar', calendar_1.default);
+app.use('/api/fields', fields_1.default);
+app.use('/api/analytics', analytics_1.default);
+app.use('/api/security-log', securityLog_1.default);
 // A05: Health endpoint — no internal implementation details exposed
+// Updated: routes now under /api prefix
 app.get('/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+// Test endpoint — should always return 200
+app.get('/test', (_, res) => res.json({ test: 'ok' }));
 exports.api = functions
     .region('us-central1')
     .runWith({ memory: '512MB', timeoutSeconds: 60 })

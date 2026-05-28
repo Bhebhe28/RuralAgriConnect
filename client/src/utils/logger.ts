@@ -4,12 +4,18 @@ const DEV = import.meta.env.DEV;
 // Fires-and-forgets — never throws, never blocks the caller.
 async function persistSecurityEvent(action: string, detail?: string) {
   try {
+    const customToken = localStorage.getItem('token');
     const { auth } = await import('../firebase');
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) return; // Not authenticated yet — login failures are logged server-side
+    const token = customToken || await auth.currentUser?.getIdToken().catch(() => null);
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     fetch('/api/security-log', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers,
       body: JSON.stringify({
         action,
         detail,

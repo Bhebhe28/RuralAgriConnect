@@ -73,9 +73,23 @@ async function verifyQueueItem(item: Record<string, unknown>, signature: string)
 }
 
 // ── Request interceptor ───────────────────────────────────────────────────────
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+import { auth } from '../firebase';
+
+api.interceptors.request.use(async (config) => {
+  // Prefer custom JWT (consistent on both localhost and deployed Functions)
+  const customToken = localStorage.getItem('token');
+  if (customToken) {
+    config.headers.Authorization = `Bearer ${customToken}`;
+    return config;
+  }
+  // Fallback: Firebase ID token
+  try {
+    const firebaseToken = await auth.currentUser?.getIdToken();
+    if (firebaseToken) {
+      config.headers.Authorization = `Bearer ${firebaseToken}`;
+      return config;
+    }
+  } catch { /* fall through */ }
   return config;
 });
 
@@ -84,11 +98,13 @@ api.interceptors.response.use(
   (res) => res,
   async (err) => {
     if (err.response?.status === 401) {
-      // SECURITY FIX — A07: Clear both access and refresh tokens on 401
-      localStorage.removeItem('token');
-      localStorage.removeItem('refreshToken');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+      // Only redirect to login if there is genuinely no active Firebase session
+      if (!auth.currentUser) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('refreshToken');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+      }
       return Promise.reject(err);
     }
 

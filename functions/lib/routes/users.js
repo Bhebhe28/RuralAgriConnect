@@ -38,11 +38,25 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const firestore_1 = require("../db/firestore");
+const uuid_1 = require("uuid");
 const auth_1 = require("../middleware/auth");
 const multer_1 = __importDefault(require("multer"));
 const admin = __importStar(require("firebase-admin"));
 const router = (0, express_1.Router)();
-const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
+const upload = (0, multer_1.default)({
+    storage: multer_1.default.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    // A01: Validate MIME type — reject non-image uploads
+    fileFilter: (_req, file, cb) => {
+        if (ALLOWED_IMAGE_MIMES.includes(file.mimetype)) {
+            cb(null, true);
+        }
+        else {
+            cb(new Error('Only JPEG, PNG, and WebP images are allowed'));
+        }
+    },
+});
 router.get('/me', auth_1.authenticate, async (req, res) => {
     const user = await (0, firestore_1.getDoc)('users', req.user.id);
     if (!user)
@@ -74,7 +88,18 @@ router.get('/', auth_1.authenticate, auth_1.requireAdmin, async (_req, res) => {
     res.json(users.map(({ password_hash, ...u }) => u));
 });
 router.delete('/:id', auth_1.authenticate, auth_1.requireAdmin, async (req, res) => {
+    const target = await (0, firestore_1.getDoc)('users', req.params.id);
+    if (!target)
+        return res.status(404).json({ error: 'User not found' });
     await (0, firestore_1.deleteDoc)('users', req.params.id);
+    await (0, firestore_1.setDoc)('activity_logs', (0, uuid_1.v4)(), {
+        user_id: req.user.id,
+        action: 'DELETE_USER',
+        entity_type: 'user',
+        entity_id: req.params.id,
+        details: `Admin deleted user: ${target.full_name} (${target.email})`,
+        created_at: (0, firestore_1.now)(),
+    });
     res.json({ message: 'User deleted' });
 });
 exports.default = router;
